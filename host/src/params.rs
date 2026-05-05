@@ -39,9 +39,6 @@ impl Params {
     pub fn set_freq(&self, freq: f32) {
         self.freq.store(f32_to_atomic(freq), Ordering::Relaxed);
     }
-    pub fn set_ufreq(&self, ufreq: u32) {
-        self.freq.store(ufreq, Ordering::Relaxed);
-    }
     pub fn set_gate(&self, gate: u8) {
         self.gate.store(gate, Ordering::Relaxed);
     }
