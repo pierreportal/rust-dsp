@@ -1,0 +1,13 @@
+
+[package]
+name = "dsp"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dsp"
+path = "src/lib.rs"
+
+[dependencies]
+libm = "0.2"
+
