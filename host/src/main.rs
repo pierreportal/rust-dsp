@@ -1,35 +1,35 @@
+mod midi;
+mod params;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SupportedStreamConfig};
 use dsp::voice::Voice;
-use std::io::{self, Read};
+use midi::{MidiController, MidiState};
+use params::Params;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
-
-struct Params {
-    freq: AtomicU32,
-}
-fn f32_to_atomic(f: f32) -> u32 {
-    f.to_bits()
-}
-fn atomic_to_f32(u: u32) -> f32 {
-    f32::from_bits(u)
-}
+use std::sync::atomic::Ordering;
 
 fn stream_audio(
     device: Device,
     mut voice: Voice,
     params: Arc<Params>,
     config: SupportedStreamConfig,
+    midi_state: Arc<MidiState>,
 ) {
     let params_clone = params.clone();
-
     let stream = device
         .build_output_stream(
             &config.into(),
             move |data: &mut [f32], _| {
                 for sample in data.iter_mut() {
-                    let freq = atomic_to_f32(params_clone.freq.load(Ordering::Relaxed));
+                    let freq = params_clone.get_freq();
+                    let gate = params_clone.get_gate();
+                    let vel = params_clone.get_vel();
                     voice.freq_smoother.set_target(freq);
+                    if gate > 0 {
+                        voice.env.trigger(vel);
+                    } else {
+                        voice.env.release();
+                    }
                     *sample = voice.next() * 0.2;
                 }
             },
@@ -41,18 +41,13 @@ fn stream_audio(
     println!("Synth running... press Ctrl+C to exit");
 
     loop {
-        let mut input = [0u8; 1];
-        io::stdin().read(&mut input).unwrap();
-
-        let freq = match input[0] {
-            b'a' => 110.0,
-            b's' => 220.0,
-            b'd' => 440.0,
-            b'f' => 880.0,
-            _ => continue,
-        };
-
-        params.freq.store(f32_to_atomic(freq), Ordering::Relaxed);
+        let input_freq = midi_state.freq.load(Ordering::Relaxed);
+        let input_gate = midi_state.gate.load(Ordering::Relaxed);
+        let input_vel = midi_state.vel.load(Ordering::Relaxed);
+        params.set_ufreq(input_freq);
+        params.set_gate(input_gate);
+        params.set_vel(input_vel);
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -61,16 +56,17 @@ fn main() {
     let device = host.default_output_device().unwrap();
     let config = device.default_output_config().unwrap();
     let sample_rate = config.sample_rate() as f32;
+    let params = Arc::new(Params::new());
 
-    let mut voice = Voice::new(sample_rate);
+    let state = Arc::new(MidiState::new());
+    let controller = MidiController {
+        state: state.clone(),
+    };
 
-    let params = Arc::new(Params {
-        freq: AtomicU32::new(f32_to_atomic(110.0)),
-    });
+    let voice = Voice::new(sample_rate);
 
-    {
-        let freq = atomic_to_f32(params.freq.load(Ordering::Relaxed));
-        voice.freq_smoother.set_target(freq);
+    match controller.start_midi() {
+        Ok(_c) => stream_audio(device, voice, params, config, state),
+        Err(e) => eprintln!("Failed to start MIDI: {}", e),
     }
-    stream_audio(device, voice, params, config);
 }

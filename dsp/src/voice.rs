@@ -1,5 +1,5 @@
+use crate::adsr::{Env, EnvState};
 use crate::distortion::Distortion;
-use crate::env::Env;
 use crate::filter::Filter;
 use crate::osc::{Osc, Waveform};
 use crate::smoother::Smoother;
@@ -22,9 +22,13 @@ impl Voice {
                 sample_rate,
             },
             env: Env {
-                value: 1.0,
-                decay: 0.01,
-                active: true,
+                attack: 0.5,
+                sustain: 1.0,
+                release: 0.5,
+                velocity: 1.0,
+                state: EnvState::Idle,
+                value: 0.0,
+                decay: 0.1,
                 sample_rate,
             },
             filter: Filter {
@@ -33,7 +37,7 @@ impl Voice {
                 sample_rate,
             },
             distortion: Distortion {
-                drive: 50.0,
+                drive: 10.0,
                 output_gain: 1.0,
             },
             freq_smoother: Smoother::new(440.0, 0.001),
