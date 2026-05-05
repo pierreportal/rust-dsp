@@ -20,7 +20,7 @@ Voice Processing (Oscillator, Envelope, Filter)
 Audio Output
 ```
 ### DSP Design
-The synthesis engine is built around a **PolyBLEP oscillator** to eliminate aliasing artifacts, an amplitude envelope for dynamic articulation, and a digital low-pass filter for tonal shaping. 
+The synthesis engine is built around a **[PolyBLEP](https://pbat.ch/sndkit/blep/) oscillator** to eliminate aliasing artifacts, an amplitude envelope for dynamic articulation, and a digital low-pass filter for tonal shaping. 
 The system is optimized for deterministic real-time execution with no dynamic allocation in the audio thread.
 
 ### Engineering Highlights
