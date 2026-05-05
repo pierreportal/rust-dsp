@@ -1,12 +1,14 @@
-//    naive saw wave:
-//    value = 2 * phase - 1
-//    Creates discontinuities → infinite harmonics → aliasing.
-//    Solution: PolyBLEP. It smooths discontinuities at edges.
+pub enum Waveform {
+    Saw,
+    Triangle,
+    Square,
+}
 
 pub struct Osc {
     pub phase: f32,
     pub freq: f32,
     pub sample_rate: f32,
+    pub waveform: Waveform,
 }
 
 fn poly_blep(t: f32, dt: f32) -> f32 {
@@ -24,7 +26,17 @@ impl Osc {
     pub fn next(&mut self) -> f32 {
         let dt = self.freq / self.sample_rate;
 
-        let mut value = 2.0 * self.phase - 1.0;
+        let mut value = match self.waveform {
+            Waveform::Saw => 2.0 * self.phase - 1.0,
+            Waveform::Triangle => 2.0 * ((2.0 * self.phase - 1.0).abs() - 0.5), //TODO: to improve
+            Waveform::Square => {
+                if self.phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+        };
 
         value -= poly_blep(self.phase, dt);
 
@@ -33,7 +45,6 @@ impl Osc {
         if self.phase >= 1.0 {
             self.phase -= 1.0;
         }
-
         value
     }
 }

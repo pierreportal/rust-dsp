@@ -1,4 +1,3 @@
-
 [package]
 name = "dsp"
 version = "0.1.0"
@@ -11,3 +10,6 @@ path = "src/lib.rs"
 [dependencies]
 libm = "0.2"
 
+[features]
+default = ["std"]
+std = []
