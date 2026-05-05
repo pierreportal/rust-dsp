@@ -18,12 +18,10 @@ fn stream_audio(
             &config.into(),
             move |data: &mut [f32], _| {
                 for sample in data.iter_mut() {
-                    let input_freq = midi_state.get_freq();
-                    let input_gate = midi_state.get_gate();
-                    let input_vel = midi_state.get_vel();
-                    voice.freq_smoother.set_target(input_freq);
-                    if input_gate == 1 {
-                        voice.env.trigger(input_vel);
+                    let (freq, gate, vel) = midi_state.get_params();
+                    voice.freq_smoother.set_target(freq);
+                    if gate == 1 {
+                        voice.env.trigger(vel);
                     } else {
                         voice.env.release();
                     }
@@ -34,8 +32,8 @@ fn stream_audio(
             None,
         )
         .unwrap();
+
     stream.play().unwrap();
-    println!("Synth running... press Ctrl+C to exit");
 
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -53,6 +51,6 @@ fn main() {
     };
     let voice = Voice::new(sample_rate);
 
-    let _connection = controller.start_midi();
+    let _connection = controller.connect();
     stream_audio(device, voice, config, params);
 }

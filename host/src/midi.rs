@@ -1,7 +1,6 @@
 use crate::params::Params;
 use midir::{Ignore, MidiInput};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 fn midi_note_to_freq(note: u8) -> f32 {
     440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
@@ -12,19 +11,16 @@ pub struct MidiController {
 }
 
 impl MidiController {
-    pub fn start_midi(&self) -> Result<midir::MidiInputConnection<Arc<Params>>, String> {
+    pub fn connect(&self) -> Result<midir::MidiInputConnection<Arc<Params>>, String> {
         let mut midi_in = MidiInput::new("keyboard input").map_err(|e| e.to_string())?;
         midi_in.ignore(Ignore::None);
         let in_ports = midi_in.ports();
-
         if in_ports.is_empty() {
             return Err(String::from("No MIDI device detected."));
         }
-
         for (i, p) in in_ports.iter().enumerate() {
             println!("{}: {}", i, midi_in.port_name(p).unwrap());
         }
-
         let port = &in_ports[0];
         let state_clone = self.state.clone();
         midi_in
@@ -45,19 +41,26 @@ fn handle_midi(midi_state: &Params, msg: &[u8]) {
             let note = msg[1];
             let vel = msg[2];
             if vel > 0 {
-                let freq = midi_note_to_freq(note);
-                midi_state.freq.store(freq.to_bits(), Ordering::Relaxed);
-                midi_state.gate.store(1, Ordering::Relaxed);
-                midi_state.vel.store(vel, Ordering::Relaxed);
+                key_on(note, vel, midi_state);
             } else {
-                midi_state.gate.store(0, Ordering::Relaxed);
-                midi_state.vel.store(0, Ordering::Relaxed);
+                key_off(midi_state);
             }
         }
         0x80 => {
-            midi_state.gate.store(0, Ordering::Relaxed);
-            midi_state.vel.store(0, Ordering::Relaxed);
+            key_off(midi_state);
         }
         _ => {}
     }
+}
+
+fn key_on(midi_note: u8, vel: u8, state: &Params) {
+    let freq = midi_note_to_freq(midi_note);
+    state.set_freq(freq);
+    state.set_gate(1);
+    state.set_vel(vel);
+}
+
+fn key_off(state: &Params) {
+    state.set_gate(0);
+    state.set_vel(0);
 }

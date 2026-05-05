@@ -45,4 +45,7 @@ impl Params {
     pub fn set_vel(&self, vel: u8) {
         self.vel.store(vel, Ordering::Relaxed);
     }
+    pub fn get_params(&self) -> (f32, u8, u8) {
+        (self.get_freq(), self.get_gate(), self.get_vel())
+    }
 }
