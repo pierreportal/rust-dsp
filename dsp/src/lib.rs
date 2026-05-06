@@ -2,7 +2,8 @@
 mod adsr;
 mod distortion;
 mod filter;
-mod osc;
+pub mod osc;
+mod patch;
 mod smoother;
 
 pub mod voice;
@@ -27,6 +28,11 @@ pub extern "C" fn voice_process(v: &mut VoiceWrapper) -> f32 {
 pub extern "C" fn note_on(v: &mut VoiceWrapper, freq: f32) {
     v.voice.freq_smoother.set_target(freq);
     v.voice.env.trigger(1);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn note_ooff(v: &mut VoiceWrapper) {
+    v.voice.env.release();
 }
 
 #[unsafe(no_mangle)]

@@ -20,7 +20,7 @@ pub struct Params {
 #[allow(unused)]
 impl Params {
     pub fn new() -> Self {
-        Params {
+        Self {
             freq: AtomicU32::new(f32_to_atomic(110.0)),
             gate: AtomicU8::new(0),
             vel: AtomicU8::new(0),

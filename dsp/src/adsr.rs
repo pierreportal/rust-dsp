@@ -1,3 +1,5 @@
+use crate::patch::Module;
+
 pub enum EnvState {
     Idle,
     Attack,
@@ -6,7 +8,7 @@ pub enum EnvState {
     Release,
 }
 
-pub struct Env {
+pub struct Adsr {
     pub value: f32,
     pub state: EnvState,
     pub sample_rate: f32,
@@ -17,7 +19,7 @@ pub struct Env {
     pub velocity: f32,
 }
 
-impl Env {
+impl Adsr {
     pub fn trigger(&mut self, vel: u8) {
         self.velocity = vel as f32 / 127.0;
         self.state = EnvState::Attack;
@@ -67,5 +69,12 @@ impl Env {
             }
         }
         self.value * self.velocity
+    }
+}
+
+impl Module for Adsr {
+    fn process(&mut self, input: f32) -> f32 {
+        let x = self.next();
+        x * input
     }
 }

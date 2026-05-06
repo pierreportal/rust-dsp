@@ -1,12 +1,14 @@
-use crate::adsr::{Env, EnvState};
+use crate::adsr::{Adsr, EnvState};
 use crate::distortion::Distortion;
 use crate::filter::Filter;
 use crate::osc::{Osc, Waveform};
+use crate::patch;
+use crate::patch::Module;
 use crate::smoother::Smoother;
 
 pub struct Voice {
     pub osc: Osc,
-    pub env: Env,
+    pub env: Adsr,
     pub filter: Filter,
     pub distortion: Distortion,
     pub freq_smoother: Smoother,
@@ -21,7 +23,7 @@ impl Voice {
                 waveform: Waveform::Triangle,
                 sample_rate,
             },
-            env: Env {
+            env: Adsr {
                 attack: 0.5,
                 sustain: 1.0,
                 release: 0.5,
@@ -45,13 +47,10 @@ impl Voice {
     }
 
     pub fn next(&mut self) -> f32 {
-        let freq = self.freq_smoother.next();
-        self.osc.freq = freq;
+        self.osc.freq = self.freq_smoother.next();
 
-        let mut sig = self.osc.next();
-        sig *= self.env.next();
-        sig = self.distortion.process(sig);
-        sig = self.filter.process(sig);
-        sig
+        let mut chain = patch!(self.osc =>  self.env => self.distortion => self.filter);
+
+        chain(1.0)
     }
 }

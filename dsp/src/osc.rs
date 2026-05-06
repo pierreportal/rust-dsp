@@ -1,3 +1,5 @@
+use crate::patch::Module;
+
 pub enum Waveform {
     Saw,
     Triangle,
@@ -46,5 +48,12 @@ impl Osc {
             self.phase -= 1.0;
         }
         value
+    }
+}
+
+impl Module for Osc {
+    fn process(&mut self, input: f32) -> f32 {
+        let x = self.next();
+        x * input
     }
 }
