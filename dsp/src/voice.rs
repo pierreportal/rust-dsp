@@ -20,7 +20,8 @@ impl Voice {
             osc: Osc {
                 phase: 0.0,
                 freq: 440.0,
-                waveform: Waveform::Triangle,
+                waveform: Waveform::Saw,
+                pulse_width: 0.7,
                 sample_rate,
             },
             env: Adsr {
@@ -42,15 +43,15 @@ impl Voice {
                 drive: 10.0,
                 output_gain: 1.0,
             },
-            freq_smoother: Smoother::new(440.0, 0.001),
+            freq_smoother: Smoother::new(440.0, 0.005),
         }
     }
 
     pub fn next(&mut self) -> f32 {
         self.osc.freq = self.freq_smoother.next();
 
-        let mut chain = patch!(self.osc =>  self.env => self.distortion => self.filter);
+        let input_gain = 1.0;
 
-        chain(1.0)
+        patch!(self.osc => self.env => self.distortion => self.filter)(input_gain)
     }
 }
