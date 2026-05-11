@@ -31,8 +31,8 @@ impl Voice {
         self.osc.freq = self.freq_smoother.next();
         self.filter.cutoff = self.filter_cutoff_smoother.next();
 
-        let input_gain = 1.0;
+        let input_sig = 1.0;
 
-        patch!(self.osc => self.env => self.distortion => self.filter)(input_gain)
+        patch!(self.osc => self.env => self.distortion => self.filter)(input_sig)
     }
 }
