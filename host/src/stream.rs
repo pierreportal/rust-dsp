@@ -1,21 +1,22 @@
+use crate::midi::MidiController;
 use crate::params::Params;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{Device, SupportedStreamConfig};
 use dsp::voice::Voice;
 use std::sync::Arc;
 
-pub fn stream_audio(
-    device: Device,
-    mut voice: Voice,
-    config: SupportedStreamConfig,
-    midi_state: Arc<Params>,
-) {
+pub fn stream_audio(device: Device, mut voice: Voice, config: SupportedStreamConfig) {
+    let params = Arc::new(Params::new());
+    let controller = MidiController {
+        state: params.clone(),
+    };
+    let _connection = controller.connect();
     let stream = device
         .build_output_stream(
             &config.into(),
             move |data: &mut [f32], _| {
                 for sample in data.iter_mut() {
-                    let (freq, gate, vel) = midi_state.get_params();
+                    let (freq, gate, vel) = params.get_params();
                     voice.freq_smoother.set_target(freq);
                     if gate == 1 {
                         voice.env.trigger(vel);

@@ -44,6 +44,16 @@ pub struct Osc {
 }
 
 impl Osc {
+    pub fn new(waveform: Waveform, sample_rate: f32) -> Self {
+        Self {
+            phase: 0.0,
+            freq: 440.0,
+            waveform: waveform,
+            pulse_width: 0.7,
+            sample_rate,
+        }
+    }
+
     pub fn next(&mut self) -> f32 {
         let dt = self.freq / self.sample_rate;
 

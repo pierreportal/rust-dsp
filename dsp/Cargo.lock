@@ -9,6 +9,9 @@ dependencies = [
  "libm",
 ]
 
+[lib]
+crate-type = ["staticlib"]
+
 [[package]]
 name = "libm"
 version = "0.2.16"

@@ -20,6 +20,18 @@ pub struct Adsr {
 }
 
 impl Adsr {
+    pub fn new(sample_rate: f32) -> Self {
+        Self {
+            attack: 0.5,
+            sustain: 1.0,
+            release: 0.5,
+            velocity: 1.0,
+            state: EnvState::Idle,
+            value: 0.0,
+            decay: 0.1,
+            sample_rate,
+        }
+    }
     pub fn trigger(&mut self, vel: u8) {
         self.velocity = vel as f32 / 127.0;
         self.state = EnvState::Attack;

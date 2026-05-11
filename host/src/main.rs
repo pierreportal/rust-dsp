@@ -6,9 +6,6 @@ use cpal::{
     traits::{DeviceTrait, HostTrait},
 };
 use dsp::voice::Voice;
-use midi::MidiController;
-use params::Params;
-use std::sync::Arc;
 use stream::stream_audio;
 
 fn define_host() -> (Device, SupportedStreamConfig, f32) {
@@ -24,10 +21,5 @@ fn main() {
 
     let voice = Voice::new(sample_rate);
 
-    let params = Arc::new(Params::new());
-    let controller = MidiController {
-        state: params.clone(),
-    };
-    let _connection = controller.connect();
-    stream_audio(device, voice, config, params);
+    stream_audio(device, voice, config);
 }
