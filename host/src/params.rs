@@ -12,6 +12,7 @@ fn atomic_to_f32(u: u32) -> f32 {
 
 #[derive(Debug)]
 pub struct Params {
+    pub midi: AtomicU8,
     pub freq: AtomicU32,
     pub gate: AtomicU8,
     pub vel: AtomicU8,
@@ -21,6 +22,7 @@ pub struct Params {
 impl Params {
     pub fn new() -> Self {
         Self {
+            midi: AtomicU8::new(46),
             freq: AtomicU32::new(f32_to_atomic(110.0)),
             gate: AtomicU8::new(0),
             vel: AtomicU8::new(0),
@@ -36,6 +38,9 @@ impl Params {
     pub fn get_vel(&self) -> u8 {
         self.vel.load(Ordering::Relaxed)
     }
+    pub fn get_midi(&self) -> u8 {
+        self.midi.load(Ordering::Relaxed)
+    }
     pub fn set_freq(&self, freq: f32) {
         self.freq.store(f32_to_atomic(freq), Ordering::Relaxed);
     }
@@ -44,6 +49,9 @@ impl Params {
     }
     pub fn set_vel(&self, vel: u8) {
         self.vel.store(vel, Ordering::Relaxed);
+    }
+    pub fn set_midi(&self, midi: u8) {
+        self.midi.store(midi, Ordering::Relaxed);
     }
     pub fn get_params(&self) -> (f32, u8, u8) {
         (self.get_freq(), self.get_gate(), self.get_vel())

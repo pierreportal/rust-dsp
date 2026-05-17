@@ -2,6 +2,8 @@
 name = "dsp"
 version = "0.1.0"
 edition = "2021"
+keywords = ["dsp", "async", "audio", "embedded", "no-std"]
+categories = ["embedded"]
 
 [lib]
 name = "dsp"
@@ -9,7 +11,3 @@ path = "src/lib.rs"
 
 [dependencies]
 libm = "0.2"
-
-[features]
-default = ["std"]
-std = []

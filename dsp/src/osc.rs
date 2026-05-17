@@ -1,5 +1,6 @@
 use crate::patch::Module;
 
+#[derive(Clone)]
 pub enum Waveform {
     Saw,
     Triangle,
@@ -35,6 +36,7 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
     0.0
 }
 
+#[derive(Clone)]
 pub struct Osc {
     pub phase: f32,
     pub freq: f32,
@@ -44,11 +46,11 @@ pub struct Osc {
 }
 
 impl Osc {
-    pub fn new(waveform: Waveform, sample_rate: f32) -> Self {
+    pub fn new(waveform: Waveform, freq: f32, sample_rate: f32) -> Self {
         Self {
             phase: 0.0,
-            freq: 440.0,
-            waveform: waveform,
+            freq,
+            waveform,
             pulse_width: 0.7,
             sample_rate,
         }

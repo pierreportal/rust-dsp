@@ -18,7 +18,7 @@ pub struct Voice {
 impl Voice {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            osc: Osc::new(Waveform::Saw, sample_rate),
+            osc: Osc::new(Waveform::PulseWidth, 220.0, sample_rate),
             env: Adsr::new(sample_rate),
             filter: Filter::new(sample_rate),
             distortion: Distortion::new(),
@@ -27,9 +27,13 @@ impl Voice {
         }
     }
 
-    pub fn next(&mut self) -> f32 {
+    fn self_update(&mut self) {
         self.osc.freq = self.freq_smoother.next();
         self.filter.cutoff = self.filter_cutoff_smoother.next();
+    }
+
+    pub fn next(&mut self) -> f32 {
+        self.self_update();
 
         let input_sig = 1.0;
 

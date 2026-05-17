@@ -1,5 +1,6 @@
 use crate::patch::Module;
 
+#[derive(PartialEq)]
 pub enum EnvState {
     Idle,
     Attack,
@@ -35,6 +36,10 @@ impl Adsr {
     pub fn trigger(&mut self, vel: u8) {
         self.velocity = vel as f32 / 127.0;
         self.state = EnvState::Attack;
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.state == EnvState::Idle
     }
 
     pub fn release(&mut self) {

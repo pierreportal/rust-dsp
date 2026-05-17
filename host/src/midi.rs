@@ -43,11 +43,12 @@ fn handle_midi(midi_state: &Params, msg: &[u8]) {
             if vel > 0 {
                 key_on(note, vel, midi_state);
             } else {
-                key_off(midi_state);
+                key_off(note, midi_state);
             }
         }
         0x80 => {
-            key_off(midi_state);
+            let note = msg[1];
+            key_off(note, midi_state);
         }
         _ => {}
     }
@@ -58,9 +59,13 @@ fn key_on(midi_note: u8, vel: u8, state: &Params) {
     state.set_freq(freq);
     state.set_gate(1);
     state.set_vel(vel);
+    state.set_midi(midi_note);
 }
 
-fn key_off(state: &Params) {
-    state.set_gate(0);
-    state.set_vel(0);
+fn key_off(midi_note: u8, state: &Params) {
+    let active_midi_note = state.get_midi();
+    if midi_note == active_midi_note {
+        state.set_gate(0);
+        state.set_vel(0);
+    }
 }

@@ -33,7 +33,7 @@ pub fn stream_audio(device: Device, mut voice: Voice, config: SupportedStreamCon
 
     stream.play().unwrap();
 
-    println!("Synth running! Press ^C to quit.");
+    println!("\nSynth running! Press ^C to quit.");
 
     loop {
         std::thread::sleep(std::time::Duration::from_millis(100));

@@ -17,7 +17,7 @@ impl Distortion {
 impl Module for Distortion {
     fn process(&mut self, input: f32) -> f32 {
         let x = input * self.drive;
-        let y = x.tanh();
-        y * self.output_gain
+        let y = libm::tanh(x as f64);
+        y as f32 * self.output_gain
     }
 }
