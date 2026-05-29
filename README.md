@@ -36,23 +36,13 @@ rust-dsp/
 │       └── lib.rs        # Library root
 │
 ├── host/         # Host application for development/testing
-│   └── src/
-│       ├── main.rs       # Audio stream setup
-│       ├── config.rs     # Device configuration
-│       ├── midi.rs       # MIDI input handling
-│       ├── params.rs     # Real-time parameter control
-│       └── stream.rs     # Audio callback
-│
-└── daisy/        # STM32 Daisy Seed hardware abstraction
-    ├── src/
-    │   ├── audio.rs      # Audio I/O via SAI/AK4556
-    │   ├── board.rs      # Board initialization
-    │   ├── gpio.rs       # LED, buttons, gate inputs
-    │   ├── system.rs     # Clock config & MPU
-    │   └── lib.rs        # HAL root
-    └── examples/
-        ├── simple_synth.rs   # Basic oscillator
-        └── voice_synth.rs    # Full voice engine
+    └── src/
+        ├── main.rs       # Audio stream setup
+        ├── config.rs     # Device configuration
+        ├── midi.rs       # MIDI input handling
+        ├── params.rs     # Real-time parameter control
+        └── stream.rs     # Audio callback
+ 
 ```
 
 ## Quick Start
@@ -228,8 +218,6 @@ cargo test --workspace --all-features
 cargo doc --workspace --no-deps
 ```
 
-See [.github/workflows/README.md](.github/workflows/README.md) for complete CI/CD documentation.
-
 ## Architecture
 
 ### Real-Time Constraints
@@ -263,33 +251,8 @@ Benchmarks on embedded STM32H7 (480MHz):
 - CPU usage: <5% at 48kHz sample rate
 - Memory footprint: <2KB RAM per voice
 
-## Embedded Hardware Support
-
-### STM32 Daisy Seed
-
-The `daisy` crate provides a hardware abstraction layer for the [Electrosmith Daisy Seed](https://www.electro-smith.com/daisy/daisy) development board:
-
-```bash
-# Build for Daisy Seed (ARM Cortex-M7)
-cd daisy
-cargo build --release --target thumbv7em-none-eabihf
-
-# Build example
-cargo build --release --example simple_synth
-```
-
-See [`daisy/README.md`](daisy/README.md) for complete hardware setup, flashing instructions, and examples.
-
-**Key Features:**
-- 48 kHz stereo audio I/O via AK4556 codec
-- DMA-based zero-copy audio processing
-- GPIO for LED, buttons, and CV/Gate
-- 480 MHz STM32H750 with FPU
-- Complete integration with DSP library
-
 ## Roadmap
 
-- [x] Hardware abstraction layer for STM32 Daisy Seed
 - [ ] Additional filter types (high-pass, band-pass, resonance)
 - [ ] LFO modulation sources
 - [ ] Polyphonic voice management
