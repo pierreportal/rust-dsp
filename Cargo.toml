@@ -2,6 +2,5 @@
 members = [
     "dsp",
     "host",
-    "daisy"
 ]
 resolver = "2"
