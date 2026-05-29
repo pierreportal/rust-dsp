@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "dsp",
-    "host"
+    "host",
+    "daisy"
 ]
 resolver = "2"
