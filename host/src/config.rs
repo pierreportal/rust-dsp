@@ -1,6 +1,6 @@
 use cpal::{
-    Device, SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait},
+    Device, SupportedStreamConfig,
 };
 
 pub fn define_host() -> (Device, SupportedStreamConfig, f32) {

@@ -11,7 +11,7 @@ pub struct MidiController {
 }
 
 impl MidiController {
-    pub fn connect(&self) -> Result<midir::MidiInputConnection<Arc<Params>>, String> {
+    pub fn connect(&self, port: usize) -> Result<midir::MidiInputConnection<Arc<Params>>, String> {
         let mut midi_in = MidiInput::new("keyboard input").map_err(|e| e.to_string())?;
         midi_in.ignore(Ignore::None);
         let in_ports = midi_in.ports();
@@ -21,7 +21,7 @@ impl MidiController {
         for (i, p) in in_ports.iter().enumerate() {
             println!("{}: {}", i, midi_in.port_name(p).unwrap());
         }
-        let port = &in_ports[0];
+        let port = &in_ports[port];
         let state_clone = self.state.clone();
         midi_in
             .connect(

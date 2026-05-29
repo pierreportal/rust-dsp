@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
 #[inline]
 fn f32_to_atomic(f: f32) -> u32 {

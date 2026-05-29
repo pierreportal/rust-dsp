@@ -10,7 +10,8 @@ pub fn stream_audio(device: Device, mut voice: Voice, config: SupportedStreamCon
     let controller = MidiController {
         state: params.clone(),
     };
-    let _connection = controller.connect();
+    let _connection = controller.connect(0);
+    let mut prev_gate = 0;
     let stream = device
         .build_output_stream(
             &config.into(),
@@ -18,12 +19,14 @@ pub fn stream_audio(device: Device, mut voice: Voice, config: SupportedStreamCon
                 for sample in data.iter_mut() {
                     let (freq, gate, vel) = params.get_params();
                     voice.freq_smoother.set_target(freq);
-                    if gate == 1 {
+                    // Edge detection: trigger only on rising edge, release only on falling edge
+                    if gate == 1 && prev_gate == 0 {
                         voice.env.trigger(vel);
-                    } else {
+                    } else if gate == 0 && prev_gate == 1 {
                         voice.env.release();
                     }
-                    *sample = voice.next() * 0.2;
+                    prev_gate = gate;
+                    *sample = voice.next_sample() * 0.2;
                 }
             },
             |err| eprintln!("audio error: {}", err),
