@@ -1,7 +1,9 @@
 use crate::patch::Module;
+use libm::sinf;
 
 #[derive(Clone)]
 pub enum Waveform {
+    Sine,
     Saw,
     Triangle,
     Square,
@@ -9,6 +11,9 @@ pub enum Waveform {
 }
 
 impl Waveform {
+    fn sine(phase: f32) -> f32 {
+        sinf(phase * core::f32::consts::TAU)
+    }
     fn saw(phase: f32) -> f32 {
         2.0 * phase - 1.0
     }
@@ -60,6 +65,7 @@ impl Osc {
         let dt = self.freq / self.sample_rate;
 
         let mut value = match self.waveform {
+            Waveform::Sine => Waveform::sine(self.phase),
             Waveform::Saw => Waveform::saw(self.phase),
             Waveform::Triangle => Waveform::triangle(self.phase),
             Waveform::Square => Waveform::square(self.phase, 0.5),
