@@ -64,6 +64,14 @@ impl Osc {
     pub fn next_sample(&mut self) -> f32 {
         let dt = self.freq / self.sample_rate;
 
+        // Advance phase first so a freshly constructed oscillator does not
+        // sit exactly on the saw/square discontinuity (where the BLEP
+        // correction cancels the waveform value and yields 0).
+        self.phase += dt;
+        if self.phase >= 1.0 {
+            self.phase -= 1.0;
+        }
+
         let mut value = match self.waveform {
             Waveform::Sine => Waveform::sine(self.phase),
             Waveform::Saw => Waveform::saw(self.phase),
@@ -74,11 +82,6 @@ impl Osc {
 
         value -= poly_blep(self.phase, dt);
 
-        self.phase += dt;
-
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
         value
     }
 }

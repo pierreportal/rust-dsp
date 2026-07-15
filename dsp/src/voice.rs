@@ -15,38 +15,49 @@ pub struct Voice {
     pub freq_smoother: Smoother,
     pub filter_cutoff_smoother: Smoother,
     pub sample_rate: f32,
+    last_cutoff: f32,
 }
+
+const INITIAL_FREQ: f32 = 440.0;
+const BASE_CUTOFF: f32 = 400.0;
+const CUTOFF_MOD_DEPTH: f32 = 2500.0;
+const RESONANCE: f32 = 0.85;
+// Skip reapplying cutoff (and its tanf) when the smoother moves less than this.
+const CUTOFF_UPDATE_THRESHOLD_HZ: f32 = 1.0;
 
 impl Voice {
     pub fn new(sample_rate: f32) -> Self {
+        let mut filter = Svf::new(sample_rate);
+        filter.set_resonance(RESONANCE);
+
         Self {
             lfo: Osc::new(Waveform::Sine, 0.05, sample_rate),
-            osc: Osc::new(Waveform::Saw, 220.0, sample_rate),
+            osc: Osc::new(Waveform::Saw, INITIAL_FREQ, sample_rate),
             env: Adsr::new(sample_rate),
-            filter: Svf::new(sample_rate),
+            filter,
             distortion: Distortion::new(),
-            freq_smoother: Smoother::new(440.0, 0.00025),
+            freq_smoother: Smoother::new(INITIAL_FREQ, 0.00025),
             filter_cutoff_smoother: Smoother::new(2000.0, 0.0005),
             sample_rate,
+            last_cutoff: f32::NEG_INFINITY,
         }
     }
 
     fn self_update(&mut self) {
         self.osc.freq = self.freq_smoother.next_sample();
-        let env = self.lfo.next_sample();
 
-        let mod_value = (env + 1.0) * 0.5;
+        let lfo_val = self.lfo.next_sample();
+        let mod_value = (lfo_val + 1.0) * 0.5;
 
-        let base_cutoff = 400.0;
+        let cutoff_target =
+            (BASE_CUTOFF + mod_value * CUTOFF_MOD_DEPTH).clamp(20.0, self.sample_rate * 0.45);
+        self.filter_cutoff_smoother.set_target(cutoff_target);
 
-        let cutoff = (base_cutoff + mod_value * 2500.0).clamp(20.0, self.sample_rate * 0.45);
-
-        self.filter_cutoff_smoother.set_target(cutoff);
-
-        self.filter
-            .set_cutoff(self.filter_cutoff_smoother.next_sample());
-
-        self.filter.set_resonance(0.85);
+        let cutoff = self.filter_cutoff_smoother.next_sample();
+        if (cutoff - self.last_cutoff).abs() >= CUTOFF_UPDATE_THRESHOLD_HZ {
+            self.filter.set_cutoff(cutoff);
+            self.last_cutoff = cutoff;
+        }
     }
 
     pub fn next_sample(&mut self) -> f32 {
@@ -54,7 +65,7 @@ impl Voice {
 
         let input_sig = 1.0;
 
-        patch!(self.osc => self.filter => self.env => self.distortion)(input_sig)
+        patch!(self.osc => self.filter => self.distortion => self.env)(input_sig)
     }
 }
 
@@ -103,10 +114,14 @@ mod tests {
         let mut voice = Voice::new(SAMPLE_RATE);
         voice.env.trigger(100);
 
-        let output = voice.next_sample();
+        // The lowpass filter's internal state takes a few samples to charge,
+        // so we look at a short window rather than a single sample.
+        let mut peak = 0.0_f32;
+        for _ in 0..128 {
+            peak = peak.max(voice.next_sample().abs());
+        }
 
-        // Should produce non-zero output after trigger
-        assert!(output.abs() > 0.0);
+        assert!(peak > 0.0, "voice should produce non-zero output after trigger");
     }
 
     #[test]
