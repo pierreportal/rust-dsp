@@ -1,0 +1,13 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+# Flash via probe-rs (ST-Link / DAP-Link). If you flash over USB DFU with
+# `cargo-embed` or the Daisy web programmer, `runner` is ignored.
+runner = "probe-rs run --chip STM32H750VBTx"
+rustflags = [
+    "-C", "link-arg=-Tlink.x",
+]
+
+[env]
+DEFMT_LOG = "info"

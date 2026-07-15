@@ -1,0 +1,42 @@
+[package]
+name = "acid-bass"
+version = "0.1.0"
+edition = "2021"
+description = "MIDI-controlled 303-style acid bass firmware for the Daisy Pod (rev 7)"
+
+[[bin]]
+name = "acid-bass"
+path = "src/main.rs"
+
+[dependencies]
+dsp = { path = "../dsp" }
+libm = "0.2"
+
+# Embedded runtime
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+panic-halt = "0.2"
+
+# Daisy BSP + STM32H7 HAL.
+# Versions pinned to a known-working pairing. If you upgrade one, upgrade both.
+daisy = { version = "0.10", features = ["seed_1_1"] }
+stm32h7xx-hal = { version = "0.16", features = ["stm32h750v", "rt", "revision_v", "usb_hs"] }
+
+# Non-blocking `Result` type used by stm32h7xx-hal's serial `read`.
+nb = "1"
+
+# Optional: fixed heapless containers if you want to expand
+heapless = "0.8"
+
+[profile.release]
+opt-level = "s"          # size-optimised for embedded
+lto = "fat"
+codegen-units = 1
+debug = 2                # keep debuginfo — stripped by objcopy, but useful for probe-rs
+overflow-checks = false
+panic = "abort"
+
+[profile.dev]
+opt-level = 1            # dev builds must still fit in flash and run at audio rate
+debug = 2
+panic = "abort"

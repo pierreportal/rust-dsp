@@ -3,4 +3,9 @@ members = [
     "dsp",
     "host",
 ]
+# `daisy` is a firmware crate targeting thumbv7em-none-eabihf. We leave it
+# out of the default workspace members so `cargo test`/`cargo build` at the
+# workspace root doesn't try to cross-compile the embedded binary against
+# the host target. Build it explicitly with `cargo build -p acid-bass`.
+exclude = ["daisy"]
 resolver = "2"
