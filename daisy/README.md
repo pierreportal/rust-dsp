@@ -37,7 +37,7 @@ cargo build --release -p acid-bass
 
 Produces `target/thumbv7em-none-eabihf/release/acid-bass`.
 
-## Flash over USB (Pod rev 7)
+## Flash over USB (Pod rev 7 or bare Seed 1.2)
 
 1. Hold **BOOT** on the Daisy, tap **RESET**, release **BOOT** — the board
    enumerates as a DFU device.
@@ -50,6 +50,51 @@ dfu-util -a 0 -s 0x08000000:leave -D acid-bass.bin
 
 Alternatively, drop `acid-bass.bin` onto the
 [Daisy Web Programmer](https://electro-smith.github.io/Programmer/).
+
+The same binary flashes onto a bare Daisy Seed 1.2 — the Pod's encoder,
+switches, and LEDs are not touched by this firmware. Which control surface
+is active is picked at compile time by `CONTROL_SOURCE` in `src/main.rs`
+(see [Control source](#control-source) below).
+
+## Control source
+
+`src/main.rs` exposes a `CONTROL_SOURCE` constant with three modes:
+
+| Mode              | Input                                                  |
+| ----------------- | ------------------------------------------------------ |
+| `TestSequencer`   | Internal melody — no external hardware needed          |
+| `Midi`            | 31.25 kbaud MIDI on USART1 RX (Seed D14 / PB7)         |
+| `Cv`              | Eurorack-style CV + gate + four pots on ADC1 / GPIO    |
+
+Rebuild after changing it. Only the peripherals for the selected mode are
+initialised, so unused pins stay free.
+
+### `Cv` mode — pinout (bare Seed 1.2)
+
+Six analog inputs on ADC1 plus one digital gate. Seed silkscreen numbers on
+the 2×10 header (matches `src/gpio.rs`):
+
+| Role                        | Seed pad | STM32 pin | ADC1 ch |
+| --------------------------- | -------- | --------- | ------- |
+| CV IN — 1V/oct pitch        | D15      | PC0       | 10      |
+| GATE IN (digital, pull-dn)  | D16      | PA3       | —       |
+| POT — filter cutoff         | D17      | PB1       | 5       |
+| POT — resonance             | D18      | PA7       | 7       |
+| POT — distortion drive      | D19      | PA6       | 3       |
+| POT — envelope decay        | D20      | PC1       | 11      |
+
+Wiring notes:
+
+- **Pots** — 10 kΩ linear, wiper to the pad above, ends to 3V3 and AGND.
+  Every ADC pad tolerates 0–3.3 V only.
+- **CV IN (D15)** — MCU pin is 0–3.3 V. Feeding real eurorack ±5 V pitch
+  CV requires an op-amp attenuator / level-shifter in front. The
+  `CV_BASE_NOTE` and `CV_OCTAVES_PER_MCU_FULLSCALE` constants in
+  `src/gpio.rs` assume a 5 V → 5-octave front-end; tune them to your
+  scaler.
+- **GATE IN (D16)** — digital with internal pull-down. A 0/3.3 V logic
+  gate works direct; a 0/+5 V eurorack gate needs a divider or
+  level-shifter to stay ≤3.3 V.
 
 ## MIDI map
 
