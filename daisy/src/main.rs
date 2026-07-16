@@ -1,16 +1,22 @@
-//! Acid-bass firmware for Daisy Pod (rev 7 = Daisy Seed 1.1 core).
+//! Acid-bass firmware for Daisy Pod (rev 7 = Daisy Seed 1.2 core).
 //!
 //! Signal path
 //!
 //! ```text
-//!   MIDI UART bytes ─► MidiParser ─► AcidBass  ─► WM8731 codec (SAI1 + DMA1)
-//!                                   (owned by
-//!                                    DMA ISR)
+//!   MIDI UART bytes ─► MidiParser ─┐
+//!                                  ├─► AcidBass  ─► PCM3060 codec (SAI1 + DMA1)
+//!   CV / gate / pots ─► gpio::Controls ─┘  (owned by DMA ISR)
 //! ```
 //!
-//! The MIDI RX is polled at the top of the audio interrupt. With a 32-frame
-//! buffer at 48 kHz the ISR fires every ~666 µs — MIDI at 31 250 baud delivers
-//! at most ~4 bytes in that window, so polling is plenty; no UART DMA needed.
+//! One control source is active per firmware build. Flip
+//! [`CONTROL_SOURCE`] to pick between:
+//!
+//! * [`ControlSource::TestSequencer`] — internal melody, no external input.
+//! * [`ControlSource::Midi`]          — 31.25 kbaud MIDI on USART1 RX.
+//! * [`ControlSource::Cv`]            — eurorack CV/gate + potentiometers on ADC1.
+//!
+//! Both MIDI and CV code paths are built either way; the unused peripheral
+//! just isn't initialised, so there's no runtime cost for the unused mode.
 //!
 //! Flashing (Pod rev 7)
 //!
@@ -28,6 +34,7 @@
 use panic_halt as _;
 
 mod acid;
+mod gpio;
 mod midi;
 mod params;
 mod test_seq;
@@ -42,17 +49,29 @@ use hal::pac::{self, interrupt};
 use hal::prelude::*;
 
 use crate::acid::AcidBass;
+use crate::gpio::Controls;
 use crate::midi::{MidiEvent, MidiParser};
 use crate::params::SharedParams;
 use crate::test_seq::TestSequencer;
 
-/// The sample rate the daisy BSP configures the WM8731 to run at.
+/// The sample rate the daisy BSP configures the PCM3060 to run at.
 const SAMPLE_RATE: f32 = 48_000.0;
 
-/// When true, ignore the MIDI UART and drive the synth from an internal
-/// melody generator. Handy for a first flash-and-listen bring-up test
-/// without a MIDI cable. Flip back to `false` for real MIDI operation.
-const USE_TEST_SEQUENCER: bool = true;
+/// Compile-time selection of where note + parameter data comes from.
+/// Only one is active per firmware image — the others are still compiled
+/// but their peripherals are not initialised.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ControlSource {
+    /// Internal step sequencer. No external hardware needed.
+    TestSequencer,
+    /// MIDI on USART1 RX. Original synth mode.
+    Midi,
+    /// Eurorack module mode — 1V/oct pitch CV + gate + four pots.
+    Cv,
+}
+
+/// Flip this to change how the synth is driven. Rebuild to switch modes.
+const CONTROL_SOURCE: ControlSource = ControlSource::Cv;
 
 // ---- Shared state between main and the audio ISR -------------------------
 
@@ -64,12 +83,16 @@ static MIDI_RX: Mutex<RefCell<Option<MidiRx>>> = Mutex::new(RefCell::new(None));
 /// The synth engine itself. Also owned by the audio ISR.
 static SYNTH: Mutex<RefCell<Option<AcidBass>>> = Mutex::new(RefCell::new(None));
 
-/// Internal melody generator used when [`USE_TEST_SEQUENCER`] is on.
+/// Internal melody generator used when [`ControlSource::TestSequencer`] is on.
 static TEST_SEQ: Mutex<RefCell<Option<TestSequencer>>> = Mutex::new(RefCell::new(None));
 
-/// CC-driven parameter surface. Written by the ISR when a CC arrives,
-/// read by the ISR when applying to the voice. Kept as a separate global
-/// so future ADC / knob sources can write into it from other contexts.
+/// CV / gate / potentiometer surface, owned by the ISR when
+/// [`ControlSource::Cv`] is active.
+static CONTROLS: Mutex<RefCell<Option<Controls>>> = Mutex::new(RefCell::new(None));
+
+/// Parameter surface shared between whichever control source is active and
+/// the audio callback. Written by the ISR when a CC or pot changes, read
+/// every block when applying to the voice.
 static SHARED: SharedParams = SharedParams::new();
 
 /// The concrete UART1 receiver type — spelled out so it can live in a static.
@@ -93,29 +116,61 @@ fn main() -> ! {
     let pins = daisy::board_split_gpios!(board, ccdr, dp);
     let audio_interface = daisy::board_split_audio!(ccdr, pins);
 
-    // ---- MIDI UART: USART1 RX on PIN_14 (PB7) -------------------------
-    //
-    // Per the Pod rev 7 pinout, the 3.5 mm TRS MIDI IN jack is wired to
-    // Seed PIN_14 = PB7 = USART1_RX. We init the peripheral in RX-only mode
-    // (`NoTx`) because PIN_13 (PB6, USART1_TX) is claimed by the Pod's
-    // encoder click switch — configuring it as UART TX would fight that
-    // input. 31 250 baud, 8N1 — the MIDI spec.
-    let midi_rx = {
-        use hal::serial::NoTx;
-        let rx = pins.GPIO.PIN_14.into_alternate::<7>(); // AF7 = USART1
-        let serial = dp
-            .USART1
-            .serial(
-                (NoTx, rx),
-                31_250.bps(),
-                ccdr.peripheral.USART1,
+    // ---- Control-source-specific peripheral bring-up -----------------
+    let mut midi_rx: Option<MidiRx> = None;
+    let mut controls: Option<Controls> = None;
+
+    match CONTROL_SOURCE {
+        ControlSource::Midi => {
+            // MIDI UART: USART1 RX on PIN_14 (PB7).
+            //
+            // Per the Pod rev 7 pinout, the 3.5 mm TRS MIDI IN jack is
+            // wired to Seed PIN_14 = PB7 = USART1_RX. We init the
+            // peripheral in RX-only mode (`NoTx`) because PIN_13 (PB6,
+            // USART1_TX) is claimed by the Pod's encoder click switch —
+            // configuring it as UART TX would fight that input. 31 250
+            // baud, 8N1 — the MIDI spec.
+            use hal::serial::NoTx;
+            let rx = pins.GPIO.PIN_14.into_alternate::<7>(); // AF7 = USART1
+            let serial = dp
+                .USART1
+                .serial(
+                    (NoTx, rx),
+                    31_250.bps(),
+                    ccdr.peripheral.USART1,
+                    &ccdr.clocks,
+                )
+                .unwrap();
+            let (_tx, mut rx) = serial.split();
+            rx.listen();
+            midi_rx = Some(rx);
+        }
+        ControlSource::Cv => {
+            // Six analog inputs on ADC1 + one digital gate. See gpio.rs
+            // for the pin-to-role map. The ADC calibration path wants a
+            // real DelayUs implementation — the SysTick delay is fine.
+            let mut delay = hal::delay::Delay::new(cp.SYST, ccdr.clocks);
+            let cv_pitch = pins.GPIO.PIN_15.into_analog();
+            let gate = pins.GPIO.PIN_16.into_pull_down_input();
+            let pot_cutoff = pins.GPIO.PIN_17.into_analog();
+            let pot_resonance = pins.GPIO.PIN_18.into_analog();
+            let pot_drive = pins.GPIO.PIN_19.into_analog();
+            let pot_decay = pins.GPIO.PIN_20.into_analog();
+            controls = Some(Controls::new(
+                dp.ADC1,
+                ccdr.peripheral.ADC12,
                 &ccdr.clocks,
-            )
-            .unwrap();
-        let (_tx, mut rx) = serial.split();
-        rx.listen(); // enable RXNE (we still poll, but this lets the ISR see it)
-        rx
-    };
+                &mut delay,
+                cv_pitch,
+                pot_cutoff,
+                pot_resonance,
+                pot_drive,
+                pot_decay,
+                gate,
+            ));
+        }
+        ControlSource::TestSequencer => {}
+    }
 
     // ---- Move ownership into globals so the ISR can reach it -----------
     let audio_interface = audio_interface.spawn().unwrap();
@@ -123,7 +178,12 @@ fn main() -> ! {
     let test_seq = TestSequencer::new(SAMPLE_RATE);
     cortex_m::interrupt::free(|cs| {
         AUDIO_INTERFACE.borrow(cs).replace(Some(audio_interface));
-        MIDI_RX.borrow(cs).replace(Some(midi_rx));
+        if let Some(rx) = midi_rx {
+            MIDI_RX.borrow(cs).replace(Some(rx));
+        }
+        if let Some(c) = controls {
+            CONTROLS.borrow(cs).replace(Some(c));
+        }
         SYNTH.borrow(cs).replace(Some(synth));
         TEST_SEQ.borrow(cs).replace(Some(test_seq));
     });
@@ -156,47 +216,60 @@ fn DMA1_STR1() {
             None => return,
         };
 
-        // --- 1. MIDI (or internal test sequencer) ---
-        if USE_TEST_SEQUENCER {
-            let mut seq_ref = TEST_SEQ.borrow(cs).borrow_mut();
-            if let Some(seq) = seq_ref.as_mut() {
-                // Advance one block worth of samples so the tempo is right.
-                seq.tick(audio::BLOCK_LENGTH, |ev| match ev {
-                    MidiEvent::NoteOn { note, velocity } => synth.note_on(note, velocity),
-                    MidiEvent::NoteOff { note } => synth.note_off(note),
-                    _ => {}
-                });
+        // --- 1. Ingest events from the active control source ---
+        match CONTROL_SOURCE {
+            ControlSource::TestSequencer => {
+                let mut seq_ref = TEST_SEQ.borrow(cs).borrow_mut();
+                if let Some(seq) = seq_ref.as_mut() {
+                    // Advance one block worth of samples so the tempo is right.
+                    seq.tick(audio::BLOCK_LENGTH, |ev| match ev {
+                        MidiEvent::NoteOn { note, velocity } => synth.note_on(note, velocity),
+                        MidiEvent::NoteOff { note } => synth.note_off(note),
+                        _ => {}
+                    });
+                }
             }
-        } else {
-            let mut rx_ref = MIDI_RX.borrow(cs).borrow_mut();
-            if let Some(rx) = rx_ref.as_mut() {
-                // Kept across ISR invocations so running-status survives.
-                static mut PARSER: MidiParser = MidiParser::new();
-                // SAFETY: only touched inside `cortex_m::interrupt::free`.
-                let parser = unsafe { &mut *core::ptr::addr_of_mut!(PARSER) };
+            ControlSource::Midi => {
+                let mut rx_ref = MIDI_RX.borrow(cs).borrow_mut();
+                if let Some(rx) = rx_ref.as_mut() {
+                    // Kept across ISR invocations so running-status survives.
+                    static mut PARSER: MidiParser = MidiParser::new();
+                    // SAFETY: only touched inside `cortex_m::interrupt::free`.
+                    let parser = unsafe { &mut *core::ptr::addr_of_mut!(PARSER) };
 
-                // Drain up to 8 bytes per ISR to bound worst-case work.
-                for _ in 0..8 {
-                    match rx.read() {
-                        Ok(byte) => {
-                            if let Some(ev) = parser.push(byte) {
-                                match ev {
-                                    MidiEvent::NoteOn { note, velocity } => {
-                                        synth.note_on(note, velocity);
+                    // Drain up to 8 bytes per ISR to bound worst-case work.
+                    for _ in 0..8 {
+                        match rx.read() {
+                            Ok(byte) => {
+                                if let Some(ev) = parser.push(byte) {
+                                    match ev {
+                                        MidiEvent::NoteOn { note, velocity } => {
+                                            synth.note_on(note, velocity);
+                                        }
+                                        MidiEvent::NoteOff { note } => {
+                                            synth.note_off(note);
+                                        }
+                                        MidiEvent::ControlChange { .. } => {
+                                            SHARED.apply_cc(&ev);
+                                        }
+                                        MidiEvent::PitchBend { .. } => {}
                                     }
-                                    MidiEvent::NoteOff { note } => {
-                                        synth.note_off(note);
-                                    }
-                                    MidiEvent::ControlChange { .. } => {
-                                        SHARED.apply_cc(&ev);
-                                    }
-                                    MidiEvent::PitchBend { .. } => {}
                                 }
                             }
+                            Err(nb::Error::WouldBlock) => break,
+                            Err(nb::Error::Other(_)) => break, // framing / overrun — drop
                         }
-                        Err(nb::Error::WouldBlock) => break,
-                        Err(nb::Error::Other(_)) => break, // framing / overrun — drop
                     }
+                }
+            }
+            ControlSource::Cv => {
+                let mut ctl_ref = CONTROLS.borrow(cs).borrow_mut();
+                if let Some(ctl) = ctl_ref.as_mut() {
+                    ctl.poll_and_apply(&SHARED, |ev| match ev {
+                        MidiEvent::NoteOn { note, velocity } => synth.note_on(note, velocity),
+                        MidiEvent::NoteOff { note } => synth.note_off(note),
+                        _ => {}
+                    });
                 }
             }
         }
