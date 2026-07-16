@@ -30,6 +30,7 @@ use panic_halt as _;
 mod acid;
 mod midi;
 mod params;
+mod test_seq;
 
 use core::cell::RefCell;
 use cortex_m::interrupt::Mutex;
@@ -43,9 +44,15 @@ use hal::prelude::*;
 use crate::acid::AcidBass;
 use crate::midi::{MidiEvent, MidiParser};
 use crate::params::SharedParams;
+use crate::test_seq::TestSequencer;
 
 /// The sample rate the daisy BSP configures the WM8731 to run at.
 const SAMPLE_RATE: f32 = 48_000.0;
+
+/// When true, ignore the MIDI UART and drive the synth from an internal
+/// melody generator. Handy for a first flash-and-listen bring-up test
+/// without a MIDI cable. Flip back to `false` for real MIDI operation.
+const USE_TEST_SEQUENCER: bool = true;
 
 // ---- Shared state between main and the audio ISR -------------------------
 
@@ -56,6 +63,9 @@ static MIDI_RX: Mutex<RefCell<Option<MidiRx>>> = Mutex::new(RefCell::new(None));
 
 /// The synth engine itself. Also owned by the audio ISR.
 static SYNTH: Mutex<RefCell<Option<AcidBass>>> = Mutex::new(RefCell::new(None));
+
+/// Internal melody generator used when [`USE_TEST_SEQUENCER`] is on.
+static TEST_SEQ: Mutex<RefCell<Option<TestSequencer>>> = Mutex::new(RefCell::new(None));
 
 /// CC-driven parameter surface. Written by the ISR when a CC arrives,
 /// read by the ISR when applying to the voice. Kept as a separate global
@@ -110,10 +120,12 @@ fn main() -> ! {
     // ---- Move ownership into globals so the ISR can reach it -----------
     let audio_interface = audio_interface.spawn().unwrap();
     let synth = AcidBass::new(SAMPLE_RATE);
+    let test_seq = TestSequencer::new(SAMPLE_RATE);
     cortex_m::interrupt::free(|cs| {
         AUDIO_INTERFACE.borrow(cs).replace(Some(audio_interface));
         MIDI_RX.borrow(cs).replace(Some(midi_rx));
         SYNTH.borrow(cs).replace(Some(synth));
+        TEST_SEQ.borrow(cs).replace(Some(test_seq));
     });
 
     // No user code in the main loop — everything happens in the audio ISR.
@@ -144,8 +156,18 @@ fn DMA1_STR1() {
             None => return,
         };
 
-        // --- 1. MIDI ---
-        {
+        // --- 1. MIDI (or internal test sequencer) ---
+        if USE_TEST_SEQUENCER {
+            let mut seq_ref = TEST_SEQ.borrow(cs).borrow_mut();
+            if let Some(seq) = seq_ref.as_mut() {
+                // Advance one block worth of samples so the tempo is right.
+                seq.tick(audio::BLOCK_LENGTH, |ev| match ev {
+                    MidiEvent::NoteOn { note, velocity } => synth.note_on(note, velocity),
+                    MidiEvent::NoteOff { note } => synth.note_off(note),
+                    _ => {}
+                });
+            }
+        } else {
             let mut rx_ref = MIDI_RX.borrow(cs).borrow_mut();
             if let Some(rx) = rx_ref.as_mut() {
                 // Kept across ISR invocations so running-status survives.
