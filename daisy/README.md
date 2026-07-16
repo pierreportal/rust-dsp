@@ -87,8 +87,8 @@ Alternatively, drop `acid-bass.bin` onto the
 
 Verified against the **Daisy Pod rev 7 databrief (v1.1, MAY/14/2026)**:
 
-- Pod rev 7 uses a **Daisy Seed 1.1** — WM8731 codec via I2C2, audio via
-  SAI1 + DMA1. `Cargo.toml` uses `daisy = { features = ["seed_1_1"] }`
+- Pod rev 7 uses a **Daisy Seed 1.2** — PCM3060 codec via I2C2, audio via
+  SAI1 + DMA1. `Cargo.toml` uses `daisy = { features = ["seed_1_2"] }`
   accordingly.
 - MIDI IN (3.5 mm TRS jack) → **Seed D14 = PB7 = USART1 RX**. Initialized
   RX-only (`NoTx`) because Seed D13 (PB6 / USART1 TX) is claimed by the

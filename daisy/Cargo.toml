@@ -19,7 +19,7 @@ panic-halt = "0.2"
 
 # Daisy BSP + STM32H7 HAL.
 # Versions pinned to a known-working pairing. If you upgrade one, upgrade both.
-daisy = { version = "0.10", features = ["seed_1_1"] }
+daisy = { version = "0.10", features = ["seed_1_2"] }
 stm32h7xx-hal = { version = "0.16", features = ["stm32h750v", "rt", "revision_v", "usb_hs"] }
 
 # Non-blocking `Result` type used by stm32h7xx-hal's serial `read`.
