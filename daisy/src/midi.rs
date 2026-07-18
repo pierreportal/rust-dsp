@@ -6,12 +6,22 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MidiEvent {
-    NoteOn { note: u8, velocity: u8 },
-    NoteOff { note: u8 },
+    NoteOn {
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        note: u8,
+    },
     /// Control Change — surfaced generically so main.rs can map controllers
     /// to synth parameters without changing the parser.
-    ControlChange { controller: u8, value: u8 },
-    PitchBend { value: i16 }, // -8192..=8191
+    ControlChange {
+        controller: u8,
+        value: u8,
+    },
+    PitchBend {
+        value: i16,
+    }, // -8192..=8191
 }
 
 /// State for a running-status streaming parser.
@@ -237,10 +247,7 @@ mod tests {
     #[test]
     fn sysex_is_swallowed() {
         let mut p = MidiParser::new();
-        let ev = feed(
-            &mut p,
-            &[0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7, 0x90, 60, 100],
-        );
+        let ev = feed(&mut p, &[0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7, 0x90, 60, 100]);
         assert_eq!(ev.len, 1);
         assert_eq!(
             ev.get(0),
