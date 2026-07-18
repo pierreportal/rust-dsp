@@ -34,86 +34,58 @@ use hal::gpio::{gpioa, gpiob, gpioc, Analog, Input};
 use hal::pac::ADC1;
 use hal::prelude::*;
 
-use crate::acid::ACCENT_THRESHOLD;
+// use crate::acid::ACCENT_THRESHOLD;
 use crate::midi::MidiEvent;
 use crate::params::SharedParams;
 
-// ---- Front-panel scaling constants ---------------------------------------
-
-/// MIDI note produced when the pitch-CV input is at 0 V (ADC reads 0).
-/// C1 = 24. Adjust to whatever your front-end pins as the low end.
 const CV_BASE_NOTE: f32 = 24.0;
-
-/// How many octaves the full ADC range (0..=0xFFFF at 16-bit) spans.
-/// With an op-amp scaler mapping ±5 V eurorack CV into 0..3.3 V on the MCU
-/// pin, a common choice is 5 octaves across the full ADC range.
 const CV_OCTAVES_PER_MCU_FULLSCALE: f32 = 5.0;
-
-/// One-pole smoothing coefficient applied to the pitch CV each block, to
-/// hide the ~few-LSB jitter on the ADC without introducing audible glide.
-/// (Actual musical portamento is handled by `AcidBass::note_on`.)
 const PITCH_SMOOTH: f32 = 0.25;
 
-/// Gate threshold expressed as a fraction of ADC full-scale (unused when
-/// the gate is wired as a pure digital input, kept here for reference in
-/// case you want to switch to sampled-analog gate detection).
 #[allow(dead_code)]
 const GATE_THRESHOLD_FRAC: f32 = 0.5;
 
-/// Default velocity for CV-triggered notes — accent is provided by a
-/// dedicated CV/gate line in richer designs; here we treat every gate rise
-/// as a normal-velocity hit unless you want to expose a switch/CV that
-/// pushes velocity above [`ACCENT_THRESHOLD`].
 const DEFAULT_VELOCITY: u8 = 96;
-
-/// ADC full-scale value at 16-bit resolution.
 const ADC_FS: f32 = 65_535.0;
 
-// ---- Pin type aliases (matches BSP `Analog` state at split) ---------------
-
+// Gate & Pitch CV IN
+pub type CvGatePin = gpioa::PA3<Input>;
 pub type CvPitchPin = gpioc::PC0<Analog>;
-pub type PotCutoffPin = gpiob::PB1<Analog>;
-pub type PotResonancePin = gpioa::PA7<Analog>;
-pub type PotDrivePin = gpioa::PA6<Analog>;
-pub type PotDecayPin = gpioc::PC1<Analog>;
-pub type GatePin = gpioa::PA3<Input>;
 
-// ---- Controls -------------------------------------------------------------
+// Pot parameters
+pub type PotParam1Pin = gpiob::PB1<Analog>;
+pub type PotParam2Pin = gpioa::PA7<Analog>;
+pub type PotParam3Pin = gpioa::PA6<Analog>;
+pub type PotParam4Pin = gpioc::PC1<Analog>;
+
+// Cv parameters
+pub type CvParam1Pin = gpioc::PC2<Analog>;
 
 pub struct Controls {
     adc: Adc<ADC1, Enabled>,
-
     cv_pitch: CvPitchPin,
-    pot_cutoff: PotCutoffPin,
-    pot_resonance: PotResonancePin,
-    pot_drive: PotDrivePin,
-    pot_decay: PotDecayPin,
-    gate: GatePin,
-
-    /// Smoothed pitch CV, in ADC counts (0..=ADC_FS).
+    pot_param1: PotParam1Pin,
+    pot_param2: PotParam2Pin,
+    pot_param3: PotParam3Pin,
+    pot_param4: PotParam4Pin,
+    cv_gate: CvGatePin,
     pitch_smoothed: f32,
-    /// Gate level captured on the previous poll — for rising/falling edges.
     gate_prev: bool,
-    /// Note currently held (captured on the last rising edge) so we release
-    /// the matching note on the falling edge.
     held_note: Option<u8>,
 }
 
 impl Controls {
-    /// Consumes the ADC12 register block + peripheral rec, boots ADC1, and
-    /// re-typestates the pins for use as ADC/GPIO inputs. `delay` is used
-    /// only during ADC power-up calibration.
     pub fn new(
         adc1: hal::stm32::ADC1,
         prec: hal::rcc::rec::Adc12,
         clocks: &hal::rcc::CoreClocks,
         delay: &mut impl hal::hal::blocking::delay::DelayUs<u8>,
         cv_pitch: CvPitchPin,
-        pot_cutoff: PotCutoffPin,
-        pot_resonance: PotResonancePin,
-        pot_drive: PotDrivePin,
-        pot_decay: PotDecayPin,
-        gate: GatePin,
+        pot_param1: PotParam1Pin,
+        pot_param2: PotParam2Pin,
+        pot_param3: PotParam3Pin,
+        pot_param4: PotParam4Pin,
+        cv_gate: CvGatePin,
     ) -> Self {
         let mut adc = Adc::adc1(adc1, 4.MHz(), delay, prec, clocks).enable();
         adc.set_resolution(Resolution::SixteenBit);
@@ -121,48 +93,39 @@ impl Controls {
         Self {
             adc,
             cv_pitch,
-            pot_cutoff,
-            pot_resonance,
-            pot_drive,
-            pot_decay,
-            gate,
+            pot_param1,
+            pot_param2,
+            pot_param3,
+            pot_param4,
+            cv_gate,
             pitch_smoothed: 0.0,
             gate_prev: false,
             held_note: None,
         }
     }
 
-    /// Sample every input once, write pot values into `SharedParams`, and
-    /// emit note-on / note-off through `on_event` for gate edges.
     pub fn poll_and_apply<F>(&mut self, params: &SharedParams, mut on_event: F)
     where
         F: FnMut(MidiEvent),
     {
-        // --- Pots → filter/env parameters -----------------------------
-        let cutoff = read_norm(&mut self.adc, &mut self.pot_cutoff);
-        let resonance = read_norm(&mut self.adc, &mut self.pot_resonance);
-        let drive = read_norm(&mut self.adc, &mut self.pot_drive);
-        let decay = read_norm(&mut self.adc, &mut self.pot_decay);
+        let value_param1 = read_norm(&mut self.adc, &mut self.pot_param1);
+        let value_param2 = read_norm(&mut self.adc, &mut self.pot_param2);
+        let value_param3 = read_norm(&mut self.adc, &mut self.pot_param3);
+        let value_param4 = read_norm(&mut self.adc, &mut self.pot_param4);
 
-        // Same mapping as `SharedParams::apply_cc` — keeps the CV path and
-        // the MIDI path producing identical param ranges.
-        params.set_cutoff(cutoff);
-        params.set_resonance(resonance);
-        params.set_drive(1.0 + drive * 19.0);
-        params.set_decay(0.02 + decay * 1.48);
+        params.set_cutoff(value_param1);
+        params.set_resonance(value_param2);
+        params.set_drive(value_param3);
+        params.set_decay(value_param4);
 
-        // --- Pitch CV → MIDI note (with light smoothing) ---------------
+        // TODO: extract control out of gpio.rs
         let raw_pitch: u32 = self.adc.read(&mut self.cv_pitch).unwrap();
         self.pitch_smoothed += PITCH_SMOOTH * (raw_pitch as f32 - self.pitch_smoothed);
         let note = cv_to_note(self.pitch_smoothed / ADC_FS);
 
-        // --- Gate edges → note events ---------------------------------
-        let gate_now = self.gate.is_high();
+        let gate_now = self.cv_gate.is_high();
         match (self.gate_prev, gate_now) {
             (false, true) => {
-                // Rising edge — capture the note now (so pitch is locked
-                // to the sample of gate onset, avoiding a wobbly attack if
-                // the CV is slewing) and fire note-on.
                 on_event(MidiEvent::NoteOn {
                     note,
                     velocity: DEFAULT_VELOCITY,
@@ -170,15 +133,11 @@ impl Controls {
                 self.held_note = Some(note);
             }
             (true, false) => {
-                // Falling edge — release whatever note we were holding.
                 if let Some(n) = self.held_note.take() {
                     on_event(MidiEvent::NoteOff { note: n });
                 }
             }
             (true, true) => {
-                // Gate stays high — if CV has moved to a new note, retrig
-                // as legato (AcidBass turns this into a slide because the
-                // previous note is still on).
                 if let Some(prev) = self.held_note {
                     if note != prev {
                         on_event(MidiEvent::NoteOn {
@@ -193,38 +152,24 @@ impl Controls {
         }
         self.gate_prev = gate_now;
 
-        // Silence the accent-threshold unused warning when no CV-driven
-        // accent input is wired — reference the constant so future edits
-        // can compute velocity from a separate CV in the DEFAULT_VELOCITY
-        // spot above.
-        let _ = ACCENT_THRESHOLD;
+        // let _ = ACCENT_THRESHOLD;
     }
 }
 
 // --------------------------------------------------------------------------
 
-/// Read a channel and normalise to 0.0..=1.0 (ADC full-scale = 1.0).
 fn read_norm<P>(adc: &mut Adc<ADC1, Enabled>, pin: &mut P) -> f32
 where
     P: embedded_hal::adc::Channel<ADC1, ID = u8>,
     Adc<ADC1, Enabled>: embedded_hal::adc::OneShot<ADC1, u32, P>,
 {
-    // OneShot::read is infallible on this HAL (returns `nb::Result<_, ()>`
-    // that never actually errors); unwrap is safe.
-    let raw: u32 =
-        embedded_hal::adc::OneShot::read(adc, pin).unwrap_or(0);
+    let raw: u32 = embedded_hal::adc::OneShot::read(adc, pin).unwrap_or(0);
     (raw as f32 / ADC_FS).clamp(0.0, 1.0)
 }
 
-/// Turn a normalised ADC reading (0.0..=1.0) into a MIDI note number.
-///
-/// Assumes the front-end op-amp maps CV → 0..3.3 V such that the ADC's
-/// full range corresponds to [`CV_OCTAVES_PER_MCU_FULLSCALE`] octaves of
-/// musical pitch, with 0 V mapping to [`CV_BASE_NOTE`].
 fn cv_to_note(norm: f32) -> u8 {
     let semitones = norm * CV_OCTAVES_PER_MCU_FULLSCALE * 12.0;
     let n = CV_BASE_NOTE + semitones;
-    // Clamp so we never index outside MIDI's 0..=127 range.
     let clamped = n.clamp(0.0, 127.0);
     clamped as u8
 }

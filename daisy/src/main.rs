@@ -54,48 +54,24 @@ use crate::midi::{MidiEvent, MidiParser};
 use crate::params::SharedParams;
 use crate::test_seq::TestSequencer;
 
-/// The sample rate the daisy BSP configures the PCM3060 to run at.
 const SAMPLE_RATE: f32 = 48_000.0;
 
-/// Compile-time selection of where note + parameter data comes from.
-/// Only one is active per firmware image — the others are still compiled
-/// but their peripherals are not initialised.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ControlSource {
-    /// Internal step sequencer. No external hardware needed.
     TestSequencer,
-    /// MIDI on USART1 RX. Original synth mode.
     Midi,
-    /// Eurorack module mode — 1V/oct pitch CV + gate + four pots.
     Cv,
 }
 
-/// Flip this to change how the synth is driven. Rebuild to switch modes.
 const CONTROL_SOURCE: ControlSource = ControlSource::Cv;
 
-// ---- Shared state between main and the audio ISR -------------------------
-
 static AUDIO_INTERFACE: Mutex<RefCell<Option<audio::Interface>>> = Mutex::new(RefCell::new(None));
-
-/// The MIDI UART receiver, owned by the audio ISR.
 static MIDI_RX: Mutex<RefCell<Option<MidiRx>>> = Mutex::new(RefCell::new(None));
-
-/// The synth engine itself. Also owned by the audio ISR.
 static SYNTH: Mutex<RefCell<Option<AcidBass>>> = Mutex::new(RefCell::new(None));
-
-/// Internal melody generator used when [`ControlSource::TestSequencer`] is on.
 static TEST_SEQ: Mutex<RefCell<Option<TestSequencer>>> = Mutex::new(RefCell::new(None));
-
-/// CV / gate / potentiometer surface, owned by the ISR when
-/// [`ControlSource::Cv`] is active.
 static CONTROLS: Mutex<RefCell<Option<Controls>>> = Mutex::new(RefCell::new(None));
-
-/// Parameter surface shared between whichever control source is active and
-/// the audio callback. Written by the ISR when a CC or pot changes, read
-/// every block when applying to the voice.
 static SHARED: SharedParams = SharedParams::new();
 
-/// The concrete UART1 receiver type — spelled out so it can live in a static.
 type MidiRx = hal::serial::Rx<pac::USART1>;
 
 // --------------------------------------------------------------------------
@@ -105,13 +81,10 @@ fn main() -> ! {
     let mut cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
 
-    // Caches — big audio-perf win. Data cache is safe here because the daisy
-    // BSP does its own cache management around the audio DMA buffers.
     cp.SCB.enable_icache();
     cp.SCB.enable_dcache(&mut cp.CPUID);
 
     let board = daisy::Board::take().unwrap();
-
     let ccdr = daisy::board_freeze_clocks!(board, dp);
     let pins = daisy::board_split_gpios!(board, ccdr, dp);
     let audio_interface = daisy::board_split_audio!(ccdr, pins);
@@ -122,14 +95,6 @@ fn main() -> ! {
 
     match CONTROL_SOURCE {
         ControlSource::Midi => {
-            // MIDI UART: USART1 RX on PIN_14 (PB7).
-            //
-            // Per the Pod rev 7 pinout, the 3.5 mm TRS MIDI IN jack is
-            // wired to Seed PIN_14 = PB7 = USART1_RX. We init the
-            // peripheral in RX-only mode (`NoTx`) because PIN_13 (PB6,
-            // USART1_TX) is claimed by the Pod's encoder click switch —
-            // configuring it as UART TX would fight that input. 31 250
-            // baud, 8N1 — the MIDI spec.
             use hal::serial::NoTx;
             let rx = pins.GPIO.PIN_14.into_alternate::<7>(); // AF7 = USART1
             let serial = dp
@@ -146,16 +111,14 @@ fn main() -> ! {
             midi_rx = Some(rx);
         }
         ControlSource::Cv => {
-            // Six analog inputs on ADC1 + one digital gate. See gpio.rs
-            // for the pin-to-role map. The ADC calibration path wants a
-            // real DelayUs implementation — the SysTick delay is fine.
             let mut delay = hal::delay::Delay::new(cp.SYST, ccdr.clocks);
             let cv_pitch = pins.GPIO.PIN_15.into_analog();
-            let gate = pins.GPIO.PIN_16.into_pull_down_input();
+            let cv_gate = pins.GPIO.PIN_16.into_pull_down_input();
             let pot_cutoff = pins.GPIO.PIN_17.into_analog();
             let pot_resonance = pins.GPIO.PIN_18.into_analog();
             let pot_drive = pins.GPIO.PIN_19.into_analog();
             let pot_decay = pins.GPIO.PIN_20.into_analog();
+
             controls = Some(Controls::new(
                 dp.ADC1,
                 ccdr.peripheral.ADC12,
@@ -166,7 +129,7 @@ fn main() -> ! {
                 pot_resonance,
                 pot_drive,
                 pot_decay,
-                gate,
+                cv_gate,
             ));
         }
         ControlSource::TestSequencer => {}
@@ -188,8 +151,6 @@ fn main() -> ! {
         TEST_SEQ.borrow(cs).replace(Some(test_seq));
     });
 
-    // No user code in the main loop — everything happens in the audio ISR.
-    // We use `wfi` so the CPU sleeps between interrupts to save power.
     loop {
         cortex_m::asm::wfi();
     }

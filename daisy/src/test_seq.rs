@@ -19,29 +19,53 @@ struct Step {
 /// Notes: A2=45, C3=48, D3=50, E3=52, G3=55, A3=57.
 const MELODY: &[Step] = &[
     // bar 1
-    Step { note: 45, velocity: 110, len_16ths: 2 }, // A2
-    Step { note: 45, velocity: 90,  len_16ths: 2 },
-    Step { note: 52, velocity: 100, len_16ths: 2 }, // E3
-    Step { note: 48, velocity: 115, len_16ths: 2 }, // C3 (accent)
-    Step { note: 55, velocity: 100, len_16ths: 2 }, // G3
-    Step { note: 45, velocity: 90,  len_16ths: 2 },
-    Step { note: 57, velocity: 120, len_16ths: 2 }, // A3 (accent)
-    Step { note: 55, velocity: 100, len_16ths: 2 },
-    // bar 2
-    Step { note: 45, velocity: 110, len_16ths: 2 },
-    Step { note: 50, velocity: 100, len_16ths: 2 }, // D3
-    Step { note: 48, velocity: 90,  len_16ths: 2 },
-    Step { note: 45, velocity: 115, len_16ths: 2 },
-    Step { note: 52, velocity: 100, len_16ths: 4 }, // E3, longer
-    Step { note: 55, velocity: 100, len_16ths: 2 },
-    Step { note: 45, velocity: 100, len_16ths: 2 },
+    Step {
+        note: 33,
+        velocity: 110,
+        len_16ths: 1,
+    }, // A1
+    Step {
+        note: 33,
+        velocity: 90,
+        len_16ths: 1,
+    },
+    Step {
+        note: 33,
+        velocity: 100,
+        len_16ths: 1,
+    }, // E3
+    Step {
+        note: 34,
+        velocity: 115,
+        len_16ths: 1,
+    }, // C3 (accent)
+    Step {
+        note: 33,
+        velocity: 100,
+        len_16ths: 1,
+    }, // G3
+    Step {
+        note: 33,
+        velocity: 90,
+        len_16ths: 1,
+    },
+    Step {
+        note: 34,
+        velocity: 120,
+        len_16ths: 1,
+    }, // A3 (accent)
+    Step {
+        note: 36,
+        velocity: 100,
+        len_16ths: 1,
+    },
 ];
 
 /// Tempo — 120 BPM feels right for a bass-line. One 16th note at 120 BPM = 125 ms.
-const BPM: f32 = 120.0;
+const BPM: f32 = 140.0;
 
 /// Gate length as a fraction of the step length (0..1). Shorter = staccato, more 303.
-const GATE_FRACTION: f32 = 0.85;
+const GATE_FRACTION: f32 = 0.95;
 
 pub struct TestSequencer {
     /// Samples per sixteenth-note.
@@ -131,7 +155,14 @@ mod tests {
                 _ => {}
             });
         }
-        assert!(note_ons >= MELODY.len(), "expected at least one full pass, got {}", note_ons);
-        assert_eq!(note_ons, note_offs, "every note-on should be paired with a note-off");
+        assert!(
+            note_ons >= MELODY.len(),
+            "expected at least one full pass, got {}",
+            note_ons
+        );
+        assert_eq!(
+            note_ons, note_offs,
+            "every note-on should be paired with a note-off"
+        );
     }
 }

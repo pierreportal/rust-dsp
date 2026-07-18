@@ -16,48 +16,32 @@
 use dsp::osc::Waveform;
 use dsp::voice::Voice;
 
-/// MIDI velocity at or above which a note is treated as accented.
 pub const ACCENT_THRESHOLD: u8 = 100;
 
-/// Slide (portamento) coefficient — larger = faster glide.
-/// Tuned per sample at 48 kHz; scale linearly if you change the sample rate.
 const SLIDE_COEFF: f32 = 0.0015;
-
-/// Non-slide freq_smoother coefficient — near-instant.
 const SNAP_COEFF: f32 = 0.5;
-
-/// Base filter cutoff in Hz.
 const BASE_CUTOFF: f32 = 200.0;
-
-/// Envelope-modulation range on top of the base cutoff, in Hz.
-/// Accented notes reach `BASE_CUTOFF + ENV_MOD_HZ + ACCENT_BOOST_HZ`.
 const ENV_MOD_HZ: f32 = 3500.0;
 const ACCENT_BOOST_HZ: f32 = 2000.0;
 
 pub struct AcidBass {
     pub voice: Voice,
     pub note_on: bool,
-    /// Currently-held MIDI note. Used to decide slide vs snap on the next note.
     pub current_note: Option<u8>,
-    /// True while the current note is accented — biases the filter envelope.
     pub accent: bool,
 }
 
 impl AcidBass {
     pub fn new(sample_rate: f32) -> Self {
         let mut voice = Voice::new(sample_rate);
-
-        // 303 voicing: square-ish saw, snappy envelope, resonant filter.
         voice.osc.waveform = Waveform::Saw;
         voice.env.attack = 0.003;
-        voice.env.decay = 0.15;
-        voice.env.sustain = 0.0; // classic 303 has no sustain — pure envelope thump
-        voice.env.release = 0.08;
+        voice.env.decay = 0.0;
+        voice.env.sustain = 0.0;
+        voice.env.release = 0.0;
 
         voice.distortion.drive = 4.0;
         voice.distortion.output_gain = 0.35;
-
-        // Freq smoother is repurposed as the portamento generator.
         voice.freq_smoother.coeff = SNAP_COEFF;
 
         Self {
@@ -73,19 +57,14 @@ impl AcidBass {
         let slide = self.note_on; // legato → slide
         self.voice.freq_smoother.coeff = if slide { SLIDE_COEFF } else { SNAP_COEFF };
         if !slide {
-            // Snap the current smoother position so we start from the new note
-            // rather than from the last released note's frequency.
             self.voice.freq_smoother.current = target;
         }
         self.voice.freq_smoother.set_target(target);
-
         self.accent = velocity >= ACCENT_THRESHOLD;
 
-        // Retrigger the envelope only for non-slide (mono, hard-legato: no retrigger).
         if !slide {
             self.voice.env.trigger(velocity);
         } else {
-            // Slide: keep envelope, but update velocity for accent handling.
             self.voice.env.velocity = velocity as f32 / 127.0;
         }
 
@@ -94,8 +73,6 @@ impl AcidBass {
     }
 
     pub fn note_off(&mut self, note: u8) {
-        // Only release if the note-off matches the currently held note —
-        // avoids cutting off a slide that has moved on to another note.
         if self.current_note == Some(note) {
             self.voice.env.release();
             self.note_on = false;
@@ -105,22 +82,14 @@ impl AcidBass {
 
     /// Produce one audio sample.
     pub fn next_sample(&mut self) -> f32 {
-        // Bias filter cutoff by accent. `Voice::self_update` will still apply
-        // the LFO mod on top of whatever base we express through the cutoff
-        // smoother target. We influence it by nudging the smoother target
-        // BEFORE `next_sample` runs its internal update — since the target we
-        // set here will be overwritten by `Voice::self_update`, we instead
-        // shift the base cutoff by tweaking the voice's resonance / distortion
-        // for accented notes here and let the voice do its own modulation.
-        //
         // For a proper 303 we want the accent to *boost the filter envelope*
         // — that's what the base voice's LFO stands in for. Adjust resonance
         // and drive on accent to fake it until we add a dedicated filter env.
-        if self.accent {
-            self.voice.distortion.drive = 6.0;
-        } else {
-            self.voice.distortion.drive = 4.0;
-        }
+        // if self.accent {
+        // self.voice.distortion.drive = 6.0;
+        // } else {
+        // self.voice.distortion.drive = 4.0;
+        // }
 
         self.voice.next_sample()
     }
@@ -174,7 +143,7 @@ mod tests {
     fn note_on_snaps_frequency_when_no_previous_note() {
         let mut bass = AcidBass::new(SR);
         bass.note_on(45, 100); // A2 = 110 Hz
-        // freq_smoother.current should equal target immediately (no slide).
+                               // freq_smoother.current should equal target immediately (no slide).
         assert!((bass.voice.freq_smoother.current - 110.0).abs() < 0.01);
     }
 
@@ -182,9 +151,9 @@ mod tests {
     fn legato_note_on_slides() {
         let mut bass = AcidBass::new(SR);
         bass.note_on(45, 100); // A2
-        // Note still on → next note-on should slide, not snap.
+                               // Note still on → next note-on should slide, not snap.
         bass.note_on(57, 100); // A3
-        // Smoother target should be A3 but current should still be near A2.
+                               // Smoother target should be A3 but current should still be near A2.
         let target = midi_to_freq(57);
         assert!((bass.voice.freq_smoother.target - target).abs() < 0.01);
         assert!(bass.voice.freq_smoother.current < target * 0.9);

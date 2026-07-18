@@ -10,13 +10,9 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::midi::MidiEvent;
 
 pub struct SharedParams {
-    // Filter cutoff bias, 0.0..1.0 → mapped to Hz in the audio callback.
     cutoff: AtomicU32,
-    // Resonance, 0.0..1.0.
     resonance: AtomicU32,
-    // Distortion drive, 1.0..20.0.
     drive: AtomicU32,
-    // Decay time in seconds, 0.02..1.5.
     decay: AtomicU32,
 }
 
@@ -63,10 +59,10 @@ impl SharedParams {
         if let MidiEvent::ControlChange { controller, value } = ev {
             let v = *value as f32 / 127.0;
             match controller {
-                74 => self.set_cutoff(v),                    // "Sound Controller 5" — filter cutoff
-                71 => self.set_resonance(v),                 // "Sound Controller 2" — resonance
-                75 => self.set_drive(1.0 + v * 19.0),        // decay/drive alt
-                72 => self.set_decay(0.02 + v * 1.48),       // release time
+                74 => self.set_cutoff(v),    // "Sound Controller 5" — filter cutoff
+                71 => self.set_resonance(v), // "Sound Controller 2" — resonance
+                75 => self.set_drive(1.0 + v * 19.0), // decay/drive alt
+                72 => self.set_decay(0.02 + v * 1.48), // release time
                 _ => {}
             }
         }
