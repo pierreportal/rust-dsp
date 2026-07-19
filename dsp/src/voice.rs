@@ -7,22 +7,22 @@ use crate::smoother::Smoother;
 use crate::svf::Svf;
 
 pub struct Voice {
-    pub lfo: Osc,
+    //---modules---
     pub osc: Osc,
     pub env: Adsr,
     pub filter: Svf,
     pub distortion: Distortion,
+    //---smoothers---
     pub freq_smoother: Smoother,
     pub filter_cutoff_smoother: Smoother,
-    pub sample_rate: f32,
+    pub filter_resonance_smoother: Smoother,
     last_cutoff: f32,
+    //---params---
+    pub sample_rate: f32,
 }
 
+const RESONANCE: f32 = 0.2;
 const INITIAL_FREQ: f32 = 440.0;
-const BASE_CUTOFF: f32 = 400.0;
-const CUTOFF_MOD_DEPTH: f32 = 2500.0;
-const RESONANCE: f32 = 0.85;
-// Skip reapplying cutoff (and its tanf) when the smoother moves less than this.
 const CUTOFF_UPDATE_THRESHOLD_HZ: f32 = 1.0;
 
 impl Voice {
@@ -31,13 +31,13 @@ impl Voice {
         filter.set_resonance(RESONANCE);
 
         Self {
-            lfo: Osc::new(Waveform::Sine, 0.05, sample_rate),
             osc: Osc::new(Waveform::Saw, INITIAL_FREQ, sample_rate),
             env: Adsr::new(sample_rate),
             filter,
             distortion: Distortion::new(),
-            freq_smoother: Smoother::new(INITIAL_FREQ, 0.00025),
+            freq_smoother: Smoother::new(INITIAL_FREQ, 0.00005),
             filter_cutoff_smoother: Smoother::new(2000.0, 0.0005),
+            filter_resonance_smoother: Smoother::new(2000.0, 0.0005),
             sample_rate,
             last_cutoff: f32::NEG_INFINITY,
         }
@@ -46,26 +46,20 @@ impl Voice {
     fn self_update(&mut self) {
         self.osc.freq = self.freq_smoother.next_sample();
 
-        let lfo_val = self.lfo.next_sample();
-        let mod_value = (lfo_val + 1.0) * 0.5;
-
-        let cutoff_target =
-            (BASE_CUTOFF + mod_value * CUTOFF_MOD_DEPTH).clamp(20.0, self.sample_rate * 0.45);
-        self.filter_cutoff_smoother.set_target(cutoff_target);
-
         let cutoff = self.filter_cutoff_smoother.next_sample();
         if (cutoff - self.last_cutoff).abs() >= CUTOFF_UPDATE_THRESHOLD_HZ {
             self.filter.set_cutoff(cutoff);
             self.last_cutoff = cutoff;
         }
+
+        let resonance = self.filter_resonance_smoother.next_sample();
+        self.filter.set_resonance(resonance);
     }
 
     pub fn next_sample(&mut self) -> f32 {
         self.self_update();
-
         let input_sig = 1.0;
-
-        patch!(self.osc => self.filter => self.distortion => self.env)(input_sig)
+        patch!(self.osc =>  self.env => self.filter => self.distortion)(input_sig)
     }
 }
 
@@ -121,7 +115,10 @@ mod tests {
             peak = peak.max(voice.next_sample().abs());
         }
 
-        assert!(peak > 0.0, "voice should produce non-zero output after trigger");
+        assert!(
+            peak > 0.0,
+            "voice should produce non-zero output after trigger"
+        );
     }
 
     #[test]

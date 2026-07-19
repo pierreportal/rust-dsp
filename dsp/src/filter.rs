@@ -1,5 +1,6 @@
 use crate::patch::Module;
 
+#[derive(Clone, Copy)]
 pub struct Filter {
     pub cutoff: f32,
     pub z: f32,

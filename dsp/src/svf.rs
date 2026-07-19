@@ -11,18 +11,15 @@ pub enum FilterMode {
 
 pub struct Svf {
     pub sample_rate: f32,
-
     pub cutoff: f32,
     pub resonance: f32,
 
     freq: f32,
     damp: f32,
-
     low: f32,
     high: f32,
     band: f32,
     notch: f32,
-
     mode: FilterMode,
 }
 
@@ -33,10 +30,8 @@ impl Svf {
 
             cutoff: 300.0,
             resonance: 0.0,
-
             freq: 0.0,
             damp: 0.0,
-
             low: 0.0,
             high: 0.0,
             band: 0.0,
@@ -46,19 +41,16 @@ impl Svf {
         };
 
         filter.update();
-
         filter
     }
 
     pub fn set_cutoff(&mut self, cutoff: f32) {
         self.cutoff = cutoff.clamp(20.0, self.sample_rate * 0.45);
-
         self.update();
     }
 
     pub fn set_resonance(&mut self, resonance: f32) {
-        self.resonance = resonance.clamp(0.0, 1.0);
-
+        self.resonance = resonance.clamp(0.05, 1.0);
         self.update();
     }
 
@@ -67,44 +59,26 @@ impl Svf {
     }
 
     fn update(&mut self) {
-        // frequency coefficient
-        //
-        // This controls how fast the filter reacts
-        //
-        let g = tanf(PI * self.cutoff / self.sample_rate);
-
-        self.freq = g;
-
-        // resonance damping
-        //
-        // higher resonance = less damping
-        //
-        self.damp = 1.0 - self.resonance * 0.9;
+        self.freq = tanf(PI * self.cutoff / self.sample_rate);
+        let q = self.resonance.clamp(0.0, 1.0);
+        self.damp = 0.5 * (2.0 - q);
     }
 
     pub fn process(&mut self, input: f32) -> f32 {
-        // feedback path
-        let feedback = self.high * self.damp;
+        let feedback = self.damp * self.band;
 
-        let input = input - feedback;
+        let high = input - self.low - feedback;
 
-        // first integrator
-        self.band += self.freq * self.high;
-
-        // second integrator
+        self.band += self.freq * high;
         self.low += self.freq * self.band;
 
-        self.high = input - self.low - self.damp * self.band;
-
+        self.high = high;
         self.notch = self.low + self.high;
 
         match self.mode {
             FilterMode::LowPass => self.low,
-
             FilterMode::HighPass => self.high,
-
             FilterMode::BandPass => self.band,
-
             FilterMode::Notch => self.notch,
         }
     }

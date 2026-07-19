@@ -1,6 +1,6 @@
 use crate::patch::Module;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub enum EnvState {
     Idle,
     Attack,
@@ -9,6 +9,7 @@ pub enum EnvState {
     Release,
 }
 
+#[derive(Clone, Copy)]
 pub struct Adsr {
     pub value: f32,
     pub state: EnvState,
@@ -77,7 +78,8 @@ impl Adsr {
             }
 
             EnvState::Release => {
-                let step = self.sustain / (self.release * self.sample_rate).max(1.0);
+                // let step = self.sustain / (self.release * self.sample_rate).max(1.0);
+                let step = self.value / (self.release * self.sample_rate).max(1.0);
                 self.value -= step;
                 if self.value <= 0.0 {
                     self.value = 0.0;

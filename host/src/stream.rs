@@ -1,11 +1,16 @@
+use crate::control::Next;
 use crate::midi::MidiController;
 use crate::params::Params;
+use crate::Control;
+
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{Device, SupportedStreamConfig};
-use dsp::voice::Voice;
 use std::sync::Arc;
 
-pub fn stream_audio(device: Device, mut voice: Voice, config: SupportedStreamConfig) {
+pub fn stream_audio<T>(device: Device, mut voice: T, config: SupportedStreamConfig)
+where
+    T: Control + Next + Send + 'static,
+{
     let params = Arc::new(Params::new());
     let controller = MidiController {
         state: params.clone(),
@@ -18,12 +23,11 @@ pub fn stream_audio(device: Device, mut voice: Voice, config: SupportedStreamCon
             move |data: &mut [f32], _| {
                 for sample in data.iter_mut() {
                     let (freq, gate, vel) = params.get_params();
-                    voice.freq_smoother.set_target(freq);
-                    // Edge detection: trigger only on rising edge, release only on falling edge
+                    voice.set_freq(freq);
                     if gate == 1 && prev_gate == 0 {
-                        voice.env.trigger(vel);
+                        voice.note_on(vel);
                     } else if gate == 0 && prev_gate == 1 {
-                        voice.env.release();
+                        voice.note_off();
                     }
                     prev_gate = gate;
                     *sample = voice.next_sample() * 0.2;

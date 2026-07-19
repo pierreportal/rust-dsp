@@ -1,7 +1,7 @@
 use crate::patch::Module;
 use libm::sinf;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum Waveform {
     Sine,
     Saw,
@@ -41,7 +41,7 @@ fn poly_blep(t: f32, dt: f32) -> f32 {
     0.0
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Osc {
     pub phase: f32,
     pub freq: f32,
