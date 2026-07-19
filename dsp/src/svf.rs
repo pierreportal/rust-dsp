@@ -1,3 +1,4 @@
+use crate::smoother::Smoother;
 use core::f32::consts::PI;
 use libm::tanf;
 
@@ -13,6 +14,8 @@ pub struct Svf {
     pub sample_rate: f32,
     pub cutoff: f32,
     pub resonance: f32,
+    pub cutoff_smoother: Smoother,
+    pub resonance_smoother: Smoother,
 
     freq: f32,
     damp: f32,
@@ -30,6 +33,8 @@ impl Svf {
 
             cutoff: 300.0,
             resonance: 0.0,
+            cutoff_smoother: Smoother::new(220.0, 0.0005),
+            resonance_smoother: Smoother::new(220.0, 0.0005),
             freq: 0.0,
             damp: 0.0,
             low: 0.0,

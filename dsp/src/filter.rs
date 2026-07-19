@@ -1,16 +1,19 @@
 use crate::patch::Module;
+use crate::smoother::Smoother;
 
 #[derive(Clone, Copy)]
 pub struct Filter {
     pub cutoff: f32,
-    pub z: f32,
-    pub sample_rate: f32,
+    pub cutoff_smoother: Smoother,
+    z: f32,
+    sample_rate: f32,
 }
 
 impl Filter {
     pub fn new(sample_rate: f32) -> Self {
         Self {
             cutoff: 2000.0,
+            cutoff_smoother: Smoother::new(220.0, 0.0005),
             z: 0.0,
             sample_rate,
         }

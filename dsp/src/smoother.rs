@@ -1,3 +1,4 @@
+#[derive(Clone, Copy)]
 pub struct Smoother {
     pub current: f32,
     pub target: f32,
@@ -11,6 +12,10 @@ impl Smoother {
             target: initial,
             coeff,
         }
+    }
+
+    pub fn set_coeff(&mut self, coeff: f32) {
+        self.coeff = coeff;
     }
 
     pub fn set_target(&mut self, target: f32) {

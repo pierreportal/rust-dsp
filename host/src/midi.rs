@@ -38,6 +38,7 @@ fn handle_midi(midi_state: &Params, msg: &[u8]) {
     let status = msg[0] & 0xF0;
     match status {
         0x90 => {
+            println!("Note On: {:?}", msg);
             let note = msg[1];
             let vel = msg[2];
             if vel > 0 {
@@ -47,10 +48,15 @@ fn handle_midi(midi_state: &Params, msg: &[u8]) {
             }
         }
         0x80 => {
+            println!("Note Off: {:?}", msg);
             let note = msg[1];
             key_off(note, midi_state);
         }
-        _ => {}
+        _ => {
+            // Here we capture custom params
+            // state.set_custom_params(...)
+            println!("MIDI msg: {:?}", msg);
+        }
     }
 }
 

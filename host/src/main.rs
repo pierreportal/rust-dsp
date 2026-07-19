@@ -4,6 +4,10 @@ mod midi;
 mod params;
 mod stream;
 use config::define_host;
+
+use params::Params;
+use std::sync::Arc;
+
 use control::{Control, Next};
 use dsp::{
     adsr::Adsr,
@@ -11,7 +15,6 @@ use dsp::{
     osc::{Osc, Waveform},
     patch,
     patch::Module,
-    smoother::Smoother,
     svf::Svf,
 };
 use std::f32;
@@ -22,9 +25,6 @@ struct Voice {
     env: Adsr,
     filter: Svf,
     distortion: Distortion,
-    freq_smoother: Smoother,
-    filter_cutoff_smoother: Smoother,
-    filter_resonance_smoother: Smoother,
 }
 
 impl Voice {
@@ -34,21 +34,18 @@ impl Voice {
             env: Adsr::new(sample_rate),
             filter: Svf::new(sample_rate),
             distortion: Distortion::new(),
-            freq_smoother: Smoother::new(220.0, 0.00005),
-            filter_cutoff_smoother: Smoother::new(2000.0, 0.0005),
-            filter_resonance_smoother: Smoother::new(2000.0, 0.0005),
         }
     }
 }
 
 impl Next for Voice {
     fn update(&mut self) {
-        self.osc.freq = self.freq_smoother.next_sample();
+        self.osc.freq = self.osc.freq_smoother.next_sample();
 
-        let cutoff = self.filter_cutoff_smoother.next_sample();
+        let cutoff = self.filter.cutoff_smoother.next_sample();
         self.filter.set_cutoff(cutoff);
 
-        let resonance = self.filter_resonance_smoother.next_sample();
+        let resonance = self.filter.resonance_smoother.next_sample();
         self.filter.set_resonance(resonance);
     }
 
@@ -63,7 +60,7 @@ impl Control for Voice {
         self.patch()
     }
     fn set_freq(&mut self, freq: f32) {
-        self.freq_smoother.set_target(freq);
+        self.osc.freq_smoother.set_target(freq);
     }
     fn note_on(&mut self, vel: u8) {
         self.env.trigger(vel);
@@ -73,8 +70,8 @@ impl Control for Voice {
     }
     fn set_float_param(&mut self, key: u8, value: f32) {
         match key {
-            77 => self.filter_cutoff_smoother.set_target(value),
-            65 => self.filter_resonance_smoother.set_target(value),
+            77 => self.filter.cutoff_smoother.set_target(value),
+            65 => self.filter.resonance_smoother.set_target(value),
             _ => {}
         }
     }
@@ -82,6 +79,12 @@ impl Control for Voice {
 
 fn main() {
     let (device, config, sample_rate) = define_host();
-    let voice = Voice::new(sample_rate);
-    stream_audio::<Voice>(device, voice, config);
+
+    let mut voice = Voice::new(sample_rate);
+
+    voice.osc.freq_smoother.set_coeff(0.0005);
+
+    let voice_params = Arc::new(Params::new());
+
+    stream_audio::<Voice>(device, voice_params, voice, config);
 }

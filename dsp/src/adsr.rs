@@ -78,7 +78,6 @@ impl Adsr {
             }
 
             EnvState::Release => {
-                // let step = self.sustain / (self.release * self.sample_rate).max(1.0);
                 let step = self.value / (self.release * self.sample_rate).max(1.0);
                 self.value -= step;
                 if self.value <= 0.0 {

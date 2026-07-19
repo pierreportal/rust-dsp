@@ -1,4 +1,4 @@
-use crate::patch::Module;
+use crate::{patch::Module, smoother::Smoother};
 use libm::sinf;
 
 #[derive(Clone, Copy)]
@@ -48,6 +48,7 @@ pub struct Osc {
     pub sample_rate: f32,
     pub waveform: Waveform,
     pub pulse_width: f32,
+    pub freq_smoother: Smoother,
 }
 
 impl Osc {
@@ -58,6 +59,7 @@ impl Osc {
             waveform,
             pulse_width: 0.7,
             sample_rate,
+            freq_smoother: Smoother::new(freq, 0.0005),
         }
     }
 
