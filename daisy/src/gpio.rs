@@ -52,23 +52,22 @@ const ADC_FS: f32 = 65_535.0;
 pub type CvGatePin = gpioa::PA3<Input>;
 pub type CvPitchPin = gpioc::PC0<Analog>;
 
-// Pot parameters
+// Custom POT parameters
 pub type PotParam1Pin = gpiob::PB1<Analog>;
 pub type PotParam2Pin = gpioa::PA7<Analog>;
 pub type PotParam3Pin = gpioa::PA6<Analog>;
 pub type PotParam4Pin = gpioc::PC1<Analog>;
 
-// Cv parameters
-pub type CvParam1Pin = gpioc::PC2<Analog>;
-
 pub struct Controls {
     adc: Adc<ADC1, Enabled>,
     cv_pitch: CvPitchPin,
+    cv_gate: CvGatePin,
+    // ---- custom params ----
     pot_param1: PotParam1Pin,
     pot_param2: PotParam2Pin,
     pot_param3: PotParam3Pin,
-    pot_param4: PotParam4Pin,
-    cv_gate: CvGatePin,
+    // pot_param4: PotParam4Pin,
+    // ------------------------
     pitch_smoothed: f32,
     gate_prev: bool,
     held_note: Option<u8>,
@@ -81,11 +80,13 @@ impl Controls {
         clocks: &hal::rcc::CoreClocks,
         delay: &mut impl hal::hal::blocking::delay::DelayUs<u8>,
         cv_pitch: CvPitchPin,
+        cv_gate: CvGatePin,
+        // ---- custom params ----
         pot_param1: PotParam1Pin,
         pot_param2: PotParam2Pin,
         pot_param3: PotParam3Pin,
-        pot_param4: PotParam4Pin,
-        cv_gate: CvGatePin,
+        // pot_param4: PotParam4Pin,
+        // ------------------------
     ) -> Self {
         let mut adc = Adc::adc1(adc1, 4.MHz(), delay, prec, clocks).enable();
         adc.set_resolution(Resolution::SixteenBit);
@@ -93,11 +94,13 @@ impl Controls {
         Self {
             adc,
             cv_pitch,
+            cv_gate,
+            // ---- custom params ----
             pot_param1,
             pot_param2,
             pot_param3,
-            pot_param4,
-            cv_gate,
+            // pot_param4,
+            // ------------------------
             pitch_smoothed: 0.0,
             gate_prev: false,
             held_note: None,
@@ -111,12 +114,12 @@ impl Controls {
         let value_param1 = read_norm(&mut self.adc, &mut self.pot_param1);
         let value_param2 = read_norm(&mut self.adc, &mut self.pot_param2);
         let value_param3 = read_norm(&mut self.adc, &mut self.pot_param3);
-        let value_param4 = read_norm(&mut self.adc, &mut self.pot_param4);
+        // let value_param4 = read_norm(&mut self.adc, &mut self.pot_param4);
 
-        params.set_cutoff(value_param1);
-        params.set_resonance(value_param2);
-        params.set_drive(value_param3);
-        params.set_decay(value_param4);
+        params.set_param1(value_param1);
+        params.set_param2(value_param2);
+        params.set_param3(value_param3);
+        // params.set_param4(value_param4);
 
         // TODO: extract control out of gpio.rs
         let raw_pitch: u32 = self.adc.read(&mut self.cv_pitch).unwrap();
@@ -128,7 +131,7 @@ impl Controls {
             (false, true) => {
                 on_event(MidiEvent::NoteOn {
                     note,
-                    velocity: DEFAULT_VELOCITY,
+                    velocity: DEFAULT_VELOCITY
                 });
                 self.held_note = Some(note);
             }

@@ -36,7 +36,7 @@ impl AcidBass {
         let mut voice = Voice::new(sample_rate);
         voice.osc.waveform = Waveform::Saw;
         voice.env.attack = 0.003;
-        voice.env.decay = 0.0;
+        voice.env.decay = 0.3;
         voice.env.sustain = 0.0;
         voice.env.release = 0.0;
 

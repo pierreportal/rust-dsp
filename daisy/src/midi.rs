@@ -6,25 +6,12 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MidiEvent {
-    NoteOn {
-        note: u8,
-        velocity: u8,
-    },
-    NoteOff {
-        note: u8,
-    },
-    /// Control Change — surfaced generically so main.rs can map controllers
-    /// to synth parameters without changing the parser.
-    ControlChange {
-        controller: u8,
-        value: u8,
-    },
-    PitchBend {
-        value: i16,
-    }, // -8192..=8191
+    NoteOn { note: u8, velocity: u8 },
+    NoteOff { note: u8 },
 }
 
 /// State for a running-status streaming parser.
+#[allow(dead_code)]
 pub struct MidiParser {
     status: u8,
     data1: u8,
@@ -32,6 +19,7 @@ pub struct MidiParser {
     in_sysex: bool,
 }
 
+#[allow(dead_code)]
 impl MidiParser {
     pub const fn new() -> Self {
         Self {
@@ -102,14 +90,7 @@ impl MidiParser {
                             }
                         }
                         0x80 => Some(MidiEvent::NoteOff { note: d1 }),
-                        0xB0 => Some(MidiEvent::ControlChange {
-                            controller: d1,
-                            value: d2,
-                        }),
-                        0xE0 => {
-                            let raw = ((d2 as i16) << 7) | (d1 as i16);
-                            Some(MidiEvent::PitchBend { value: raw - 8192 })
-                        }
+
                         _ => None,
                     }
                 }

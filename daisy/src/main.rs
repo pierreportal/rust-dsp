@@ -1,6 +1,7 @@
 //! ```bash
-//! cargo build --release
-//! cargo objcopy --release -- -O binary acid-bass.bin
+//! cargo build --release -p acid-bass
+//! cargo objcopy --release -p acid-bass -- -O binary acid-bass-cv.bin
+//!
 //! # then hold BOOT + tap RESET on the Pod to enter DFU, then:
 //! dfu-util -a 0 -s 0x08000000:leave -D acid-bass.bin
 //! # or drop the .bin onto https://electro-smith.github.io/Programmer/
@@ -15,7 +16,6 @@ mod acid;
 mod gpio;
 mod midi;
 mod params;
-// mod test_seq;
 
 use core::cell::RefCell;
 use cortex_m::interrupt::Mutex;
@@ -24,13 +24,11 @@ use cortex_m_rt::entry;
 use daisy::audio;
 use daisy::hal;
 use hal::pac::{self, interrupt};
-use hal::prelude::*;
 
 use crate::acid::AcidBass;
 use crate::gpio::Controls;
-use crate::midi::{MidiEvent};
+use crate::midi::MidiEvent;
 use crate::params::SharedParams;
-// use crate::test_seq::TestSequencer;
 
 const SAMPLE_RATE: f32 = 48_000.0;
 
@@ -53,15 +51,16 @@ fn main() -> ! {
     let pins = daisy::board_split_gpios!(board, ccdr, dp);
     let audio_interface = daisy::board_split_audio!(ccdr, pins);
 
-    let mut controls: Option<Controls> = None;
+    let controls: Option<Controls>;
 
     let mut delay = hal::delay::Delay::new(cp.SYST, ccdr.clocks);
     let cv_pitch = pins.GPIO.PIN_15.into_analog();
     let cv_gate = pins.GPIO.PIN_16.into_pull_down_input();
-    let pot_cutoff = pins.GPIO.PIN_17.into_analog();
-    let pot_resonance = pins.GPIO.PIN_18.into_analog();
-    let pot_drive = pins.GPIO.PIN_19.into_analog();
-    let pot_decay = pins.GPIO.PIN_20.into_analog();
+    // ----- custom params ------
+    let pot_param1 = pins.GPIO.PIN_17.into_analog();
+    let pot_param2 = pins.GPIO.PIN_18.into_analog();
+    let pot_param3 = pins.GPIO.PIN_19.into_analog();
+    // let pot_param4 = pins.GPIO.PIN_20.into_analog();
 
     controls = Some(Controls::new(
         dp.ADC1,
@@ -69,11 +68,12 @@ fn main() -> ! {
         &ccdr.clocks,
         &mut delay,
         cv_pitch,
-        pot_cutoff,
-        pot_resonance,
-        pot_drive,
-        pot_decay,
         cv_gate,
+        // ----- custom params ------
+        pot_param1,
+        pot_param2,
+        pot_param3,
+        // pot_param4,
     ));
 
     // ---- Move ownership into globals so the ISR can reach it -----------
@@ -112,14 +112,12 @@ fn DMA1_STR1() {
             ctl.poll_and_apply(&SHARED, |ev| match ev {
                 MidiEvent::NoteOn { note, velocity } => synth.note_on(note, velocity),
                 MidiEvent::NoteOff { note } => synth.note_off(note),
-                _ => {}
             });
         }
-        synth.voice.env.decay = SHARED.decay();
-        synth.voice.env.release = SHARED.decay().min(0.6);
-        synth.voice.distortion.drive = SHARED.drive();
-        synth.voice.filter.set_resonance(SHARED.resonance());
-        let _ = SHARED.cutoff();
+        synth.voice.env.decay = SHARED.read_param1() * 0.5;
+        synth.voice.env.release = (SHARED.read_param1() * 0.5).min(0.6);
+        synth.voice.filter_cutoff_smoother.set_target(200.0 + SHARED.read_param2() * 5000.0);
+        synth.voice.filter_resonance_smoother.set_target((SHARED.read_param3() * 5.0).clamp(0.0, 1.0));
 
         audio_interface
             .handle_interrupt_dma1_str1(|block| {

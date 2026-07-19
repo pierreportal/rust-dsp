@@ -7,66 +7,48 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::midi::MidiEvent;
-
 pub struct SharedParams {
-    cutoff: AtomicU32,
-    resonance: AtomicU32,
-    drive: AtomicU32,
-    decay: AtomicU32,
+    param1: AtomicU32,
+    param2: AtomicU32,
+    param3: AtomicU32,
+    // param4: AtomicU32,
 }
 
 impl SharedParams {
     pub const fn new() -> Self {
         Self {
-            cutoff: AtomicU32::new(f32_to_bits(0.4)),
-            resonance: AtomicU32::new(f32_to_bits(0.7)),
-            drive: AtomicU32::new(f32_to_bits(4.0)),
-            decay: AtomicU32::new(f32_to_bits(0.15)),
+            param1: AtomicU32::new(f32_to_bits(0.4)),
+            param2: AtomicU32::new(f32_to_bits(0.7)),
+            param3: AtomicU32::new(f32_to_bits(0.2)),
+            // param4: AtomicU32::new(f32_to_bits(0.15)),
         }
     }
 
-    pub fn set_cutoff(&self, v: f32) {
-        self.cutoff.store(f32_to_bits(v), Ordering::Relaxed);
+    pub fn set_param1(&self, v: f32) {
+        self.param1.store(f32_to_bits(v), Ordering::Relaxed);
     }
-    pub fn set_resonance(&self, v: f32) {
-        self.resonance.store(f32_to_bits(v), Ordering::Relaxed);
+    pub fn set_param2(&self, v: f32) {
+        self.param2.store(f32_to_bits(v), Ordering::Relaxed);
     }
-    pub fn set_drive(&self, v: f32) {
-        self.drive.store(f32_to_bits(v), Ordering::Relaxed);
+    pub fn set_param3(&self, v: f32) {
+        self.param3.store(f32_to_bits(v), Ordering::Relaxed);
     }
-    pub fn set_decay(&self, v: f32) {
-        self.decay.store(f32_to_bits(v), Ordering::Relaxed);
-    }
+    // pub fn set_param4(&self, v: f32) {
+    //     self.param4.store(f32_to_bits(v), Ordering::Relaxed);
+    // }
 
-    pub fn cutoff(&self) -> f32 {
-        f32_from_bits(self.cutoff.load(Ordering::Relaxed))
+    pub fn read_param1(&self) -> f32 {
+        f32_from_bits(self.param1.load(Ordering::Relaxed))
     }
-    pub fn resonance(&self) -> f32 {
-        f32_from_bits(self.resonance.load(Ordering::Relaxed))
+    pub fn read_param2(&self) -> f32 {
+        f32_from_bits(self.param2.load(Ordering::Relaxed))
     }
-    pub fn drive(&self) -> f32 {
-        f32_from_bits(self.drive.load(Ordering::Relaxed))
+    pub fn read_param3(&self) -> f32 {
+        f32_from_bits(self.param3.load(Ordering::Relaxed))
     }
-    pub fn decay(&self) -> f32 {
-        f32_from_bits(self.decay.load(Ordering::Relaxed))
-    }
-
-    /// Apply a MIDI CC to the shared parameter surface.
-    /// Chosen so a standard controller (LinnStrument, launchpad, keystation)
-    /// maps to something sensible out of the box.
-    pub fn apply_cc(&self, ev: &MidiEvent) {
-        if let MidiEvent::ControlChange { controller, value } = ev {
-            let v = *value as f32 / 127.0;
-            match controller {
-                74 => self.set_cutoff(v),    // "Sound Controller 5" — filter cutoff
-                71 => self.set_resonance(v), // "Sound Controller 2" — resonance
-                75 => self.set_drive(1.0 + v * 19.0), // decay/drive alt
-                72 => self.set_decay(0.02 + v * 1.48), // release time
-                _ => {}
-            }
-        }
-    }
+    // pub fn decay(&self) -> f32 {
+    //     f32_from_bits(self.param4.load(Ordering::Relaxed))
+    // }
 }
 
 const fn f32_to_bits(x: f32) -> u32 {
