@@ -17,14 +17,14 @@ use dsp::{
 use std::f32;
 use stream::stream_audio;
 
-pub struct Voice {
-    pub osc: Osc,
-    pub env: Adsr,
-    pub filter: Svf,
-    pub distortion: Distortion,
-    pub freq_smoother: Smoother,
-    pub filter_cutoff_smoother: Smoother,
-    pub filter_resonance_smoother: Smoother,
+struct Voice {
+    osc: Osc,
+    env: Adsr,
+    filter: Svf,
+    distortion: Distortion,
+    freq_smoother: Smoother,
+    filter_cutoff_smoother: Smoother,
+    filter_resonance_smoother: Smoother,
 }
 
 impl Voice {
