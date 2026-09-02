@@ -191,6 +191,31 @@ Parameter smoothing to avoid zipper noise:
 - `smooth_time: f32` - smoothing time in seconds
 - `target: f32` - target value
 
+## Web / WASM (`web`)
+
+The `web` crate compiles the DSP graph to WebAssembly for browser use. It's a
+standalone package (kept out of the root workspace so `cargo --workspace` and
+CI don't build the wasm target):
+
+- `web/src/lib.rs` — `wasm-bindgen` `Graph` API driven from an AudioWorklet.
+- `web/src/graph.rs` — runtime (mutable) patch-graph engine.
+- `web/src/registry.rs` — **module catalogue** (kind codes, ports, params)
+  serialized to `module-registry.json`, the single source of truth the browser
+  UI's palette is built from.
+- `web/scripts/build-dsp.sh` — builds wasm pkg + registry into `web/pkg/`.
+
+The browser client lives in a separate repo
+([rust-dsp-web](https://github.com/pierreportal/rust-dsp-web)) and downloads
+`pkg` from a rust-dsp release.
+
+### Releasing a new DSP module
+
+1. Add the module in `dsp/` and wire it into `web/src/graph.rs` + `registry.rs`.
+2. Push a `web-vX.Y.Z` tag — the `Release web DSP` workflow builds the pkg +
+   registry and attaches `rust-dsp-pkg.tar.gz` to a GitHub release.
+3. Deploy the rust-dsp-web client pinned to `web-vX.Y.Z` — users get the new
+   module with no TypeScript changes.
+
 ## Development
 
 ### Building for Embedded
