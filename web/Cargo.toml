@@ -1,0 +1,21 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition = "2021"
+description = "WebAssembly bindings for the rust-dsp Voice, for use with the Web Audio API."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dsp = { path = "../dsp" }
+wasm-bindgen = "0.2"
+
+# Keep this crate out of the parent workspace so `cargo --workspace` in the
+# repo root (and in CI) does not try to build the wasm target.
+[workspace]
+
+# wasm-opt requires the binaryen binary, which isn't always available.
+# Disable it; the `release` profile already optimizes the Rust side.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

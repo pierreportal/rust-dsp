@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>rust-dsp modular</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+<!--
+# build the wasm (after editing web/src/*.rs, rerun this)
+cd web && wasm-pack build --target web --release
+
+# run the app
+cd ui && npm install && npm run dev
+# open http://localhost:5173/   <- must be localhost (secure context for AudioWorklet)
+-->

@@ -1,1 +1,4 @@
 target/
+web/pkg/
+web/target/
+web/ui/node_modules/
