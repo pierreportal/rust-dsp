@@ -1,0 +1,75 @@
+name: Release web DSP
+
+# Produces the WebAssembly bundle + module-registry.json that the rust-dsp-web
+# UI repo consumes. Triggered on tag push (e.g. `web-v0.2.0`) or manually with
+# a version. The resulting pkg tarball is attached to a GitHub release;
+# rust-dsp-web downloads it from that release tag when building the client.
+on:
+  push:
+    tags:
+      - "web-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to create (e.g. 0.2.0)"
+        required: true
+        default: "0.2.0"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build wasm pkg + registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            web/target
+          key: ${{ runner.os }}-cargo-web-${{ hashFiles('web/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-web-
+
+      - name: Install wasm-pack
+        run: curl -sSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: Build wasm pkg + registry
+        working-directory: web
+        run: ./scripts/build-dsp.sh --release
+
+      - name: Verify module-registry.json is valid JSON
+        working-directory: web
+        run: python3 -m json.tool pkg/module-registry.json > /dev/null
+
+      - name: Archive pkg
+        working-directory: web
+        run: tar czf rust-dsp-pkg.tar.gz -C pkg .
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=web-v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Web DSP ${{ steps.tag.outputs.tag }}"
+          files: web/rust-dsp-pkg.tar.gz
+          fail_on_unmatched_files: true

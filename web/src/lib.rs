@@ -3,10 +3,20 @@
 //! Compiled with `wasm-pack build --target web`. The `Graph` type is driven
 //! from an AudioWorklet processor (see `web/ui/public/graph-processor.js`);
 //! the React UI mirrors its node/edge state into the worklet via messages.
-mod graph;
+pub mod graph;
+pub mod registry;
 
 use graph::GraphEngine;
+use registry::registry_json;
 use wasm_bindgen::prelude::*;
+
+/// Serialized module catalogue (kind codes, ports, params). The web UI fetches
+/// this to render the palette, so new modules added in Rust appear there
+/// without any TS-side changes.
+#[wasm_bindgen]
+pub fn registry_json_js() -> String {
+    registry_json()
+}
 
 #[wasm_bindgen]
 pub struct Graph {

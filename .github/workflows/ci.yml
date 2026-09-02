@@ -244,3 +244,38 @@ jobs:
 
       - name: Check MSRV
         run: cargo check --workspace --all-features
+
+  web:
+    name: Web crate (registry + wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            web/target
+          key: ${{ runner.os }}-cargo-web-${{ hashFiles('web/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-web-
+
+      - name: Install wasm-pack
+        run: curl -sSL https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: Run registry tests (native)
+        working-directory: web
+        run: cargo test
+
+      - name: Build wasm pkg + registry
+        working-directory: web
+        run: ./scripts/build-dsp.sh
+
