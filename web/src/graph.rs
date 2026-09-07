@@ -220,7 +220,15 @@ impl Node {
                 let a = inputs.first().copied().unwrap_or(0.0);
                 let b = inputs.get(1).copied().unwrap_or(0.0);
                 let c = inputs.get(2).copied().unwrap_or(0.0);
-                out[0] = a + b + c;
+                // Scale by the number of connected inputs so summing multiple
+                // sources doesn't immediately push the signal past full scale.
+                let mut n = 0u32;
+                let mut sum = 0.0f32;
+                for v in [a, b, c] {
+                    sum += v;
+                    n += 1;
+                }
+                out[0] = if n > 0 { sum / n as f32 } else { 0.0 };
                 false
             }
             Kind::Constant => {
@@ -312,6 +320,25 @@ pub struct GraphEngine {
     input_sources: Vec<Vec<Vec<(u32, u32)>>>, // [id][input_port] -> sources
     current_out: Vec<Vec<f32>>, // [id][output_port]
     out_ids: Vec<u32>, // ids of Out nodes (sinks)
+}
+
+/// Master soft-clip + output headroom.
+///
+/// The raw graph can sum signals that exceed full scale (a saw at ~±1.0 times
+/// an envelope peaking at 1.0, a mixer with several inputs, multiple Out
+/// sinks). A naive hard clamp near ±1.0 flattens the waveform tops into harsh,
+/// harmonically rich "digital" distortion. Instead we apply a soft-knee tanh
+/// limiter so overloads saturate smoothly, and we scale the signal to leave
+/// headroom (the limiter's linear region sits well below 0 dBFS).
+const MASTER_HEADROOM: f32 = 0.5; // nominal level ≤ ±0.5 → well under full scale
+const LIMITER_DRIVE: f32 = 2.2;   // gently raises the soft-knee saturation point
+
+#[inline]
+fn master_limiter(x: f32) -> f32 {
+    let y = (x * MASTER_HEADROOM) as f64;
+    // tanh(x) ≈ x for small x (linear pass-through for clean signals) and
+    // saturates smoothly toward ±1 as the input grows.
+    (libm::tanh(y * LIMITER_DRIVE as f64) / libm::tanh(LIMITER_DRIVE as f64)) as f32
 }
 
 impl GraphEngine {
@@ -486,9 +513,9 @@ impl GraphEngine {
         true
     }
 
-    /// Render `out.len()` samples into `out`. If there are multiple Out nodes,
-    /// their signals are summed (and clamped to [-1,1]).
-    pub fn process(&mut self, out: &mut [f32]) {
+/// Render `out.len()` samples into `out`. If there are multiple Out nodes,
+/// their signals are summed, then run through the master soft-clip limiter.
+pub fn process(&mut self, out: &mut [f32]) {
         if self.order.is_empty() {
             for s in out.iter_mut() {
                 *s = 0.0;
@@ -527,11 +554,118 @@ impl GraphEngine {
                 // already summed via is_out path; nothing more
                 let _ = oid;
             }
-            if *sample > 1.0 {
-                *sample = 1.0;
-            } else if *sample < -1.0 {
-                *sample = -1.0;
-            }
+            *sample = master_limiter(*sample);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SR: f32 = 48000.0;
+
+    fn default_patch(g: &mut GraphEngine) {
+        g.add_node(0, Kind::Midi as u32);
+        g.add_node(1, Kind::Osc as u32);
+        g.add_node(2, Kind::Adsr as u32);
+        g.add_node(3, Kind::Vca as u32);
+        g.add_node(4, Kind::Out as u32);
+        g.connect(0, 1, 1, 0); // midi pitch -> osc freq cv
+        g.connect(0, 0, 2, 0); // midi gate -> adsr gate
+        g.connect(1, 0, 3, 0); // osc -> vca signal
+        g.connect(2, 0, 3, 1); // env -> vca gain
+        g.connect(3, 0, 4, 0); // vca -> out
+    }
+
+    #[test]
+    fn default_patch_gain_is_bounded() {
+        let mut g = GraphEngine::new(SR);
+        default_patch(&mut g);
+        g.note_on(0, 60, 127);
+
+        let mut buf = vec![0.0f32; SR as usize];
+        g.process(&mut buf);
+
+        let peak = buf.iter().fold(0.0f32, |a, &s| a.max(s.abs()));
+        assert!(
+            peak.is_finite() && peak <= 1.0,
+            "peak {} must be bounded by the master limiter",
+            peak
+        );
+        assert!(
+            peak >= 0.3,
+            "peak {} too low — the note should be clearly audible",
+            peak
+        );
+        assert!(
+            buf.iter().skip(SR as usize / 2).all(|s| s.is_finite()),
+            "output must stay finite"
+        );
+    }
+
+    #[test]
+    fn repeated_note_on_does_not_retrigger_env() {
+        let mut g = GraphEngine::new(SR);
+        g.add_node(0, Kind::Midi as u32);
+        g.add_node(1, Kind::Adsr as u32);
+        g.add_node(2, Kind::Out as u32);
+        g.connect(0, 0, 1, 0); // gate -> adsr
+        g.connect(1, 0, 2, 0); // env -> out
+
+        g.note_on(0, 60, 127);
+
+        let mut buf1 = vec![0.0f32; SR as usize];
+        g.process(&mut buf1);
+
+        // Repeated note_ons while the gate is still high must not retrigger.
+        g.note_on(0, 60, 127);
+        g.note_on(0, 60, 127);
+        let mut buf2 = vec![0.0f32; SR as usize];
+        g.process(&mut buf2);
+
+        let min1 = buf1.iter().skip(SR as usize * 3 / 4).cloned().fold(f32::MAX, f32::min);
+        let min2 = buf2.iter().skip(SR as usize / 4).cloned().fold(f32::MAX, f32::min);
+        assert!(
+            min1 > 0.4 && min2 > 0.4,
+            "env collapsed (min1={min1}, min2={min2}) — repeated note_on retriggered it"
+        );
+
+        // Releasing then re-triggering SHOULD retrigger (normal).
+        g.note_off(0);
+        // release defaults to 0.3s; wait well past it.
+        let mut rel = vec![0.0f32; (SR * 2.0) as usize];
+        g.process(&mut rel);
+        assert!(rel.iter().rev().take(SR as usize / 10).all(|s| s.abs() < 0.01));
+        g.note_on(0, 60, 127);
+        let mut buf3 = vec![0.0f32; SR as usize];
+        g.process(&mut buf3);
+        assert!(buf3.iter().take(1024).any(|&s| s > 0.2));
+    }
+
+    #[test]
+    fn mixer_scales_summed_inputs() {
+        let mut g = GraphEngine::new(SR);
+        g.add_node(0, Kind::Constant as u32);
+        g.add_node(1, Kind::Constant as u32);
+        g.add_node(2, Kind::Constant as u32);
+        g.add_node(3, Kind::Mixer as u32);
+        g.add_node(4, Kind::Out as u32);
+        g.set_param(0, "value", 1.0);
+        g.set_param(1, "value", 1.0);
+        g.set_param(2, "value", 1.0);
+        g.connect(0, 0, 3, 0);
+        g.connect(1, 0, 3, 1);
+        g.connect(2, 0, 3, 2);
+        g.connect(3, 0, 4, 0);
+
+        let mut buf = vec![0.0f32; 64];
+        g.process(&mut buf);
+        // 1+1+1 averaged → 1.0 (then the master soft-limiter maps it ≈0.82).
+        let v = buf[0];
+        assert!(
+            (v - master_limiter(1.0)).abs() < 1e-3,
+            "mixer output unexpected: {v}"
+        );
     }
 }
