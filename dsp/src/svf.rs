@@ -34,7 +34,7 @@ impl Svf {
             cutoff: 300.0,
             resonance: 0.0,
             cutoff_smoother: Smoother::new(220.0, 0.0005),
-            resonance_smoother: Smoother::new(220.0, 0.0005),
+            resonance_smoother: Smoother::new(0.2, 0.0005),
             freq: 0.0,
             damp: 0.0,
             low: 0.0,
