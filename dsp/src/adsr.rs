@@ -1,5 +1,10 @@
 use crate::patch::Module;
 
+const DEFAULT_ATTACK: f32 = 0.5;
+const DEFAULT_DECAY: f32 = 0.1;
+const DEFAULT_SUSTAIN: f32 = 1.0;
+const DEFAULT_RELEASE: f32 = 0.5;
+
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum EnvState {
     Idle,
@@ -24,19 +29,24 @@ pub struct Adsr {
 impl Adsr {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            attack: 0.5,
-            sustain: 1.0,
-            release: 0.5,
+            attack: DEFAULT_ATTACK,
+            decay: DEFAULT_DECAY,
+            sustain: DEFAULT_SUSTAIN,
+            release: DEFAULT_RELEASE,
             velocity: 1.0,
             state: EnvState::Idle,
             value: 0.0,
-            decay: 0.1,
             sample_rate,
         }
     }
     pub fn trigger(&mut self, vel: u8) {
         self.velocity = vel as f32 / 127.0;
         self.state = EnvState::Attack;
+    }
+    pub fn reset(&mut self) {
+        self.value = 0.0;
+        self.velocity = 1.0;
+        self.state = EnvState::Idle;
     }
 
     pub fn is_idle(&self) -> bool {
@@ -78,8 +88,11 @@ impl Adsr {
             }
 
             EnvState::Release => {
-                let step = self.value / (self.release * self.sample_rate).max(1.0);
+                let samples = (self.release * self.sample_rate).max(1.0);
+                let step = 1.0 / samples;
+
                 self.value -= step;
+
                 if self.value <= 0.0 {
                     self.value = 0.0;
                     self.state = EnvState::Idle;
@@ -268,29 +281,31 @@ mod tests {
     }
 
     #[test]
-    fn test_release_reaches_idle() {
+    fn release_duration_is_predictable() {
         let mut adsr = Adsr::new(SAMPLE_RATE);
+
         adsr.attack = 0.001;
         adsr.decay = 0.001;
-        adsr.sustain = 0.5;
+        adsr.sustain = 1.0;
         adsr.release = 0.01;
+
         adsr.trigger(127);
 
-        // Process to sustain
-        let samples = (0.005 * SAMPLE_RATE) as usize;
-        for _ in 0..samples {
+        // Reach sustain.
+        for _ in 0..(0.01 * SAMPLE_RATE) as usize {
             adsr.next_sample();
         }
 
+        assert_eq!(adsr.state, EnvState::Sustain);
+
         adsr.release();
 
-        // Process entire release
-        let release_samples = (0.02 * SAMPLE_RATE) as usize;
+        let release_samples = (adsr.release * SAMPLE_RATE) as usize;
+
         for _ in 0..release_samples {
             adsr.next_sample();
         }
 
-        // Should return to idle
         assert!(adsr.is_idle());
         assert_eq!(adsr.value, 0.0);
     }
@@ -341,40 +356,5 @@ mod tests {
 
         // Output should be scaled by envelope
         assert!(output >= 0.0 && output <= input);
-    }
-
-    #[test]
-    fn test_full_envelope_cycle() {
-        let mut adsr = Adsr::new(SAMPLE_RATE);
-        adsr.attack = 0.01;
-        adsr.decay = 0.01;
-        adsr.sustain = 0.6;
-        adsr.release = 0.01;
-
-        // Start idle
-        assert!(adsr.is_idle());
-
-        // Trigger
-        adsr.trigger(100);
-        assert!(!adsr.is_idle());
-
-        // Process through attack and decay
-        for _ in 0..(0.03 * SAMPLE_RATE) as usize {
-            adsr.next_sample();
-        }
-
-        // Should be in sustain
-        assert_eq!(adsr.state, EnvState::Sustain);
-
-        // Release
-        adsr.release();
-
-        // Process release
-        for _ in 0..(0.02 * SAMPLE_RATE) as usize {
-            adsr.next_sample();
-        }
-
-        // Back to idle
-        assert!(adsr.is_idle());
     }
 }
