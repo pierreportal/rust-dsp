@@ -11,3 +11,6 @@ path = "src/lib.rs"
 
 [dependencies]
 libm = "0.2"
+
+[dev-dependencies]
+hound = "3"
