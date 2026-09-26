@@ -10,20 +10,39 @@ impl Smoother {
         Self {
             current: initial,
             target: initial,
-            coeff,
+            coeff: coeff.clamp(0.0, 1.0),
         }
     }
 
+    pub fn from_time(initial: f32, time_seconds: f32, sample_rate: f32) -> Self {
+        let time = time_seconds.max(0.000001);
+
+        // ~63.2% of the distance after `time_seconds`.
+        let coeff = 1.0 - libm::expf(-1.0 / (time * sample_rate));
+
+        Self::new(initial, coeff)
+    }
+
     pub fn set_coeff(&mut self, coeff: f32) {
-        self.coeff = coeff;
+        self.coeff = coeff.clamp(0.0, 1.0);
     }
 
     pub fn set_target(&mut self, target: f32) {
         self.target = target;
     }
 
+    pub fn snap_to(&mut self, value: f32) {
+        self.current = value;
+        self.target = value;
+    }
+
     pub fn next_sample(&mut self) -> f32 {
         self.current += (self.target - self.current) * self.coeff;
+
+        // Avoid tiny floating-point residue.
+        if (self.current - self.target).abs() < 1e-7 {
+            self.current = self.target;
+        }
         self.current
     }
 }
