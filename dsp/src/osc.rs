@@ -1,7 +1,7 @@
 use crate::{patch::Module, smoother::Smoother};
 use libm::sinf;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Waveform {
     Sine,
     Saw,
@@ -31,14 +31,27 @@ impl Waveform {
 }
 
 fn poly_blep(t: f32, dt: f32) -> f32 {
+    if dt <= 0.0 {
+        return 0.0;
+    }
+
     if t < dt {
         let t = t / dt;
-        return t + t - t * t - 1.0;
+        t + t - t * t - 1.0
     } else if t > 1.0 - dt {
         let t = (t - 1.0) / dt;
-        return t * t + t + t + 1.0;
+        t * t + t + t + 1.0
+    } else {
+        0.0
     }
-    0.0
+}
+
+fn poly_blep_square(phase: f32, dt: f32) -> f32 {
+    poly_blep(phase, dt) - poly_blep((phase + 0.5) % 1.0, dt)
+}
+
+fn poly_blep_pulse(phase: f32, width: f32, dt: f32) -> f32 {
+    poly_blep(phase, dt) - poly_blep((phase + 1.0 - width) % 1.0, dt)
 }
 
 #[derive(Clone, Copy)]
@@ -64,7 +77,8 @@ impl Osc {
     }
 
     pub fn next_sample(&mut self) -> f32 {
-        let dt = self.freq / self.sample_rate;
+        let freq = self.freq.max(0.0).min(self.sample_rate * 0.5);
+        let dt = freq / self.sample_rate;
 
         // Advance phase first so a freshly constructed oscillator does not
         // sit exactly on the saw/square discontinuity (where the BLEP
@@ -74,17 +88,37 @@ impl Osc {
             self.phase -= 1.0;
         }
 
-        let mut value = match self.waveform {
-            Waveform::Sine => Waveform::sine(self.phase),
-            Waveform::Saw => Waveform::saw(self.phase),
-            Waveform::Triangle => Waveform::triangle(self.phase),
-            Waveform::Square => Waveform::square(self.phase, 0.5),
-            Waveform::PulseWidth => Waveform::square(self.phase, self.pulse_width),
-        };
+        let phase = self.phase;
 
-        value -= poly_blep(self.phase, dt);
+        match self.waveform {
+            Waveform::Sine => Waveform::sine(phase),
 
-        value
+            Waveform::Saw => {
+                let naive = Waveform::saw(phase);
+                naive - poly_blep(phase, dt)
+            }
+
+            Waveform::Triangle => {
+                // Keep the current triangle for now.
+                //
+                // Proper band-limited triangle generation should be
+                // addressed separately with PolyBLAMP / integrated
+                // band-limited square.
+                Waveform::triangle(phase)
+            }
+
+            Waveform::Square => {
+                let naive = Waveform::square(phase, 0.5);
+                naive + poly_blep_square(phase, dt)
+            }
+
+            Waveform::PulseWidth => {
+                let width = self.pulse_width.clamp(0.01, 0.99);
+                let naive = Waveform::square(phase, width);
+
+                naive + poly_blep_pulse(phase, width, dt)
+            }
+        }
     }
 }
 
@@ -245,5 +279,64 @@ mod tests {
         assert_eq!(osc1.phase, osc2.phase);
         assert_eq!(osc1.freq, osc2.freq);
         assert_eq!(osc1.sample_rate, osc2.sample_rate);
+    }
+
+    #[test]
+    fn sine_does_not_apply_blep() {
+        let mut osc = Osc::new(Waveform::Sine, 440.0, SAMPLE_RATE);
+
+        for _ in 0..1000 {
+            let output = osc.next_sample();
+            assert!(output.is_finite());
+            assert!((-1.0..=1.0).contains(&output));
+        }
+    }
+
+    #[test]
+    fn oscillator_output_is_bounded() {
+        let waveforms = [
+            Waveform::Sine,
+            Waveform::Saw,
+            Waveform::Triangle,
+            Waveform::Square,
+            Waveform::PulseWidth,
+        ];
+
+        for waveform in waveforms {
+            let mut osc = Osc::new(waveform, 440.0, SAMPLE_RATE);
+
+            for _ in 0..10000 {
+                let output = osc.next_sample();
+
+                assert!(
+                    output.is_finite(),
+                    "{waveform:?} produced non-finite output"
+                );
+
+                assert!(
+                    output.abs() <= 1.1,
+                    "{waveform:?} exceeded expected range: {output}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pulse_width_is_clamped() {
+        let mut osc = Osc::new(Waveform::PulseWidth, 440.0, SAMPLE_RATE);
+
+        osc.pulse_width = 0.0;
+
+        for _ in 0..100 {
+            let output = osc.next_sample();
+            assert!(output.is_finite());
+        }
+
+        osc.pulse_width = 1.0;
+
+        for _ in 0..100 {
+            let output = osc.next_sample();
+            assert!(output.is_finite());
+        }
     }
 }
