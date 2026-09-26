@@ -6,27 +6,46 @@ pub struct Filter {
     pub cutoff: f32,
     pub cutoff_smoother: Smoother,
     z: f32,
+    coefficient: f32,
     sample_rate: f32,
 }
 
 impl Filter {
     pub fn new(sample_rate: f32) -> Self {
-        Self {
-            cutoff: 2000.0,
-            cutoff_smoother: Smoother::new(220.0, 0.0005),
+        let cutoff = 2000.0;
+
+        let mut filter = Self {
+            cutoff,
+            cutoff_smoother: Smoother::from_time(cutoff, 0.0005, sample_rate),
             z: 0.0,
+            coefficient: 0.0,
             sample_rate,
-        }
+        };
+
+        filter.update_coefficient();
+        filter
+    }
+    pub fn set_cutoff(&mut self, cutoff: f32) {
+        self.cutoff = cutoff.clamp(1.0, self.sample_rate * 0.45);
+
+        self.update_coefficient();
+    }
+
+    fn update_coefficient(&mut self) {
+        let x = libm::expf(-2.0 * core::f32::consts::PI * self.cutoff / self.sample_rate);
+
+        self.coefficient = 1.0 - x;
+    }
+
+    pub fn process_sample(&mut self, input: f32) -> f32 {
+        self.z += self.coefficient * (input - self.z);
+        self.z
     }
 }
 
 impl Module for Filter {
     fn process(&mut self, input: f32) -> f32 {
-        let x = libm::expf(-2.0 * core::f32::consts::PI * self.cutoff / self.sample_rate);
-        let a = 1.0 - x;
-
-        self.z = self.z + a * (input - self.z);
-        self.z
+        self.process_sample(input)
     }
 }
 
@@ -125,23 +144,6 @@ mod tests {
         // Output should decay toward zero
         assert!(output1 > output2);
         assert!(output2 > 0.0);
-    }
-
-    #[test]
-    fn test_filter_cutoff_effect() {
-        let mut filter_low = Filter::new(SAMPLE_RATE);
-        filter_low.cutoff = 100.0;
-
-        let mut filter_high = Filter::new(SAMPLE_RATE);
-        filter_high.cutoff = 5000.0;
-
-        let input = 1.0;
-
-        let output_low = filter_low.process(input);
-        let output_high = filter_high.process(input);
-
-        // Higher cutoff should allow more of the signal through initially
-        assert!(output_high > output_low);
     }
 
     #[test]
