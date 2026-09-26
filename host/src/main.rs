@@ -25,6 +25,7 @@ struct Voice {
     env: Adsr,
     filter: Svf,
     distortion: Distortion,
+    filter_env: Adsr,
 }
 
 impl Voice {
@@ -34,6 +35,7 @@ impl Voice {
             env: Adsr::new(sample_rate),
             filter: Svf::new(sample_rate),
             distortion: Distortion::new(),
+            filter_env: Adsr::new(sample_rate),
         }
     }
 }
@@ -43,7 +45,10 @@ impl Next for Voice {
         self.osc.freq = self.osc.freq_smoother.next_sample();
 
         let cutoff = self.filter.cutoff_smoother.next_sample();
-        self.filter.set_cutoff(cutoff);
+
+        let filter_env_value = self.filter_env.next_sample();
+
+        self.filter.set_cutoff(cutoff + filter_env_value * 300.0);
 
         let resonance = self.filter.resonance_smoother.next_sample();
         self.filter.set_resonance(resonance);
@@ -64,9 +69,12 @@ impl Control for Voice {
     }
     fn note_on(&mut self, vel: u8) {
         self.env.trigger(vel);
+
+        self.filter_env.trigger(vel);
     }
     fn note_off(&mut self) {
         self.env.release();
+        self.filter_env.release();
     }
     fn set_float_param(&mut self, key: u8, value: f32) {
         match key {
@@ -81,6 +89,14 @@ fn main() {
     let (device, config, sample_rate) = define_host();
 
     let mut voice = Voice::new(sample_rate);
+
+    voice.env.attack = 0.0;
+    voice.env.release = 0.0;
+
+    voice.filter_env.attack = 0.1;
+    voice.filter_env.decay = 1.0;
+    voice.filter_env.sustain = 0.0;
+    voice.filter_env.release = 0.2;
 
     voice.osc.freq_smoother.set_coeff(0.0005);
 
