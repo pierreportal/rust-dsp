@@ -26,11 +26,15 @@ pub struct ParamSpec {
 fn color(kind: Kind) -> &'static str {
     match kind {
         Kind::Osc => "#3b82f6",
+        Kind::SineOsc => "#3b82f6",
+        Kind::SawOsc => "#3b82f6",
+        Kind::SquareOsc => "#3b82f6",
         Kind::Adsr => "#a855f7",
         Kind::Filter => "#06b6d4",
         Kind::Distortion => "#f97316",
         Kind::Vca => "#22c55e",
         Kind::Mixer => "#eab308",
+        Kind::AcidFilter => "#06b6d4",
         Kind::Constant => "#64748b",
         Kind::Out => "#ef4444",
         Kind::Midi => "#ec4899",
@@ -42,8 +46,12 @@ fn palette_order() -> &'static [Kind] {
     &[
         Kind::Midi,
         Kind::Osc,
+        Kind::SineOsc,
+        Kind::SquareOsc,
+        Kind::SawOsc,
         Kind::Adsr,
         Kind::Filter,
+        Kind::AcidFilter,
         Kind::Distortion,
         Kind::Vca,
         Kind::Mixer,
@@ -54,30 +62,111 @@ fn palette_order() -> &'static [Kind] {
 
 fn osc_params() -> &'static [ParamSpec] {
     &[
-        ParamSpec { name: "freq", label: "freq (Hz)", min: 20.0, max: 4000.0, step: 1.0, default: 220.0 },
-        ParamSpec { name: "waveform", label: "wave (0-4)", min: 0.0, max: 4.0, step: 1.0, default: 1.0 },
-        ParamSpec { name: "pulseWidth", label: "pulse width", min: 0.05, max: 0.95, step: 0.01, default: 0.5 },
+        ParamSpec {
+            name: "freq",
+            label: "freq (Hz)",
+            min: 20.0,
+            max: 4000.0,
+            step: 1.0,
+            default: 220.0,
+        },
+        ParamSpec {
+            name: "waveform",
+            label: "wave (0-4)",
+            min: 0.0,
+            max: 4.0,
+            step: 1.0,
+            default: 1.0,
+        },
+        ParamSpec {
+            name: "pulseWidth",
+            label: "pulse width",
+            min: 0.05,
+            max: 0.95,
+            step: 0.01,
+            default: 0.5,
+        },
     ]
+}
+
+fn single_wave_osc_params() -> &'static [ParamSpec] {
+    &[ParamSpec {
+        name: "freq",
+        label: "freq (Hz)",
+        min: 20.0,
+        max: 4000.0,
+        step: 1.0,
+        default: 220.0,
+    }]
 }
 
 fn adsr_params() -> &'static [ParamSpec] {
     &[
-        ParamSpec { name: "attack", label: "attack (s)", min: 0.001, max: 2.0, step: 0.001, default: 0.01 },
-        ParamSpec { name: "decay", label: "decay (s)", min: 0.001, max: 2.0, step: 0.001, default: 0.15 },
-        ParamSpec { name: "sustain", label: "sustain", min: 0.0, max: 1.0, step: 0.01, default: 0.7 },
-        ParamSpec { name: "release", label: "release (s)", min: 0.001, max: 3.0, step: 0.001, default: 0.3 },
+        ParamSpec {
+            name: "attack",
+            label: "attack (s)",
+            min: 0.001,
+            max: 2.0,
+            step: 0.001,
+            default: 0.01,
+        },
+        ParamSpec {
+            name: "decay",
+            label: "decay (s)",
+            min: 0.001,
+            max: 2.0,
+            step: 0.001,
+            default: 0.15,
+        },
+        ParamSpec {
+            name: "sustain",
+            label: "sustain",
+            min: 0.0,
+            max: 1.0,
+            step: 0.01,
+            default: 0.7,
+        },
+        ParamSpec {
+            name: "release",
+            label: "release (s)",
+            min: 0.001,
+            max: 3.0,
+            step: 0.001,
+            default: 0.3,
+        },
     ]
 }
 
 fn filter_params() -> &'static [ParamSpec] {
     &[
-        ParamSpec { name: "cutoff", label: "cutoff (Hz)", min: 40.0, max: 12000.0, step: 1.0, default: 1200.0 },
-        ParamSpec { name: "resonance", label: "resonance", min: 0.05, max: 1.0, step: 0.01, default: 0.2 },
+        ParamSpec {
+            name: "cutoff",
+            label: "cutoff (Hz)",
+            min: 40.0,
+            max: 12000.0,
+            step: 1.0,
+            default: 1200.0,
+        },
+        ParamSpec {
+            name: "resonance",
+            label: "resonance",
+            min: 0.05,
+            max: 1.0,
+            step: 0.01,
+            default: 0.2,
+        },
     ]
 }
 
 fn distortion_params() -> &'static [ParamSpec] {
-    &[ParamSpec { name: "drive", label: "drive", min: 1.0, max: 30.0, step: 0.1, default: 4.0 }]
+    &[ParamSpec {
+        name: "drive",
+        label: "drive",
+        min: 1.0,
+        max: 30.0,
+        step: 0.1,
+        default: 4.0,
+    }]
 }
 
 const EMPTY: &[ParamSpec] = &[];
@@ -85,14 +174,20 @@ const EMPTY: &[ParamSpec] = &[];
 fn params(kind: Kind) -> &'static [ParamSpec] {
     match kind {
         Kind::Osc => osc_params(),
+        Kind::SineOsc | Kind::SawOsc | Kind::SquareOsc => single_wave_osc_params(),
         Kind::Adsr => adsr_params(),
-        Kind::Filter => filter_params(),
+        Kind::Filter | Kind::AcidFilter => filter_params(),
         Kind::Distortion => distortion_params(),
         Kind::Vca => EMPTY,
         Kind::Mixer => EMPTY,
-        Kind::Constant => &[
-            ParamSpec { name: "value", label: "value", min: -2.0, max: 2.0, step: 0.01, default: 0.5 },
-        ],
+        Kind::Constant => &[ParamSpec {
+            name: "value",
+            label: "value",
+            min: -2.0,
+            max: 2.0,
+            step: 0.01,
+            default: 0.5,
+        }],
         Kind::Out => EMPTY,
         Kind::Midi => EMPTY,
     }
@@ -101,8 +196,12 @@ fn params(kind: Kind) -> &'static [ParamSpec] {
 fn label(kind: Kind) -> &'static str {
     match kind {
         Kind::Osc => "Oscillator",
+        Kind::SineOsc => "Sine",
+        Kind::SawOsc => "Saw",
+        Kind::SquareOsc => "Square",
         Kind::Adsr => "ADSR",
         Kind::Filter => "Filter (SVF)",
+        Kind::AcidFilter => "Acid Filter",
         Kind::Distortion => "Distortion",
         Kind::Vca => "VCA",
         Kind::Mixer => "Mixer",
@@ -141,8 +240,18 @@ pub fn registry_json() -> String {
             out.push(',');
         }
         first = false;
-        let inputs = k.inputs().iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(",");
-        let outputs = k.outputs().iter().map(|s| format!("\"{s}\"")).collect::<Vec<_>>().join(",");
+        let inputs = k
+            .inputs()
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let outputs = k
+            .outputs()
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(",");
         let ps = params(k);
         let mut pj = String::new();
         for (j, p) in ps.iter().enumerate() {
@@ -180,10 +289,17 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(&s).unwrap();
         let modules = val["modules"].as_object().unwrap();
         let order = val["order"].as_array().unwrap();
-        assert_eq!(modules.len(), order.len(), "every module in order must exist");
+        assert_eq!(
+            modules.len(),
+            order.len(),
+            "every module in order must exist"
+        );
         for k in order {
             let key = k.as_u64().unwrap().to_string();
-            assert!(modules.contains_key(&key), "module {key} missing from modules");
+            assert!(
+                modules.contains_key(&key),
+                "module {key} missing from modules"
+            );
         }
     }
 }

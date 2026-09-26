@@ -4,6 +4,7 @@
 //! mutable node graph that can be rewired from the UI at runtime. Each node
 //! has typed input/output ports; edges route output ports to input ports.
 //! The graph is processed sample-by-sample in topological order each block.
+use dsp::acid_filter::AcidFilter;
 use dsp::adsr::Adsr;
 use dsp::distortion::Distortion;
 use dsp::osc::{Osc, Waveform};
@@ -19,9 +20,13 @@ pub enum Kind {
     Distortion = 3,
     Vca = 4,
     Mixer = 5,
+    AcidFilter = 6,
     Constant = 7,
     Out = 8,
     Midi = 9,
+    SineOsc = 10,
+    SawOsc = 11,
+    SquareOsc = 12,
 }
 
 impl Kind {
@@ -33,9 +38,13 @@ impl Kind {
             3 => Some(Kind::Distortion),
             4 => Some(Kind::Vca),
             5 => Some(Kind::Mixer),
+            6 => Some(Kind::AcidFilter),
             7 => Some(Kind::Constant),
             8 => Some(Kind::Out),
             9 => Some(Kind::Midi),
+            10 => Some(Kind::SineOsc),
+            11 => Some(Kind::SawOsc),
+            12 => Some(Kind::SquareOsc),
             _ => None,
         }
     }
@@ -47,10 +56,14 @@ impl Kind {
             Kind::Filter => &["signal", "cutoff cv"],
             Kind::Distortion => &["signal"],
             Kind::Vca => &["signal", "gain cv"],
-            Kind::Mixer => &["a", "b", "c"],
+            Kind::Mixer => &["a", "b", "c", "d"],
+            Kind::AcidFilter => &["signal", "cutoff cv", "resonance cv"],
             Kind::Constant => &[],
             Kind::Out => &["signal"],
             Kind::Midi => &[],
+            Kind::SineOsc => &["freq cv"],
+            Kind::SawOsc => &["freq cv"],
+            Kind::SquareOsc => &["freq cv"],
         }
     }
 
@@ -62,9 +75,13 @@ impl Kind {
             Kind::Distortion => &["signal"],
             Kind::Vca => &["signal"],
             Kind::Mixer => &["out"],
+            Kind::AcidFilter => &["signal"],
             Kind::Constant => &["value"],
             Kind::Out => &[],
             Kind::Midi => &["gate", "pitch cv"],
+            Kind::SineOsc => &["signal"],
+            Kind::SawOsc => &["signal"],
+            Kind::SquareOsc => &["signal"],
         }
     }
 }
@@ -112,6 +129,7 @@ pub enum NodeDsp {
     Osc(Osc),
     Adsr(Adsr),
     Filter(Svf),
+    AcidFilter(AcidFilter),
     Distortion(Distortion),
     None,
 }
@@ -120,8 +138,8 @@ pub struct Node {
     pub kind: Kind,
     pub params: Params,
     pub dsp: NodeDsp,
-    pub gated: bool,    // ADSR gate tracking
-    pub midi_note: u8,  // last MIDI note
+    pub gated: bool,     // ADSR gate tracking
+    pub midi_note: u8,   // last MIDI note
     pub midi_gate: bool, // MIDI gate on/off
 }
 
@@ -131,6 +149,21 @@ impl Node {
         let dsp = match kind {
             Kind::Osc => {
                 let mut o = Osc::new(waveform_from_u8(params.waveform), params.freq, sample_rate);
+                o.pulse_width = params.pulse_width;
+                NodeDsp::Osc(o)
+            }
+            Kind::SineOsc => {
+                let mut o = Osc::new(Waveform::Sine, params.freq, sample_rate);
+                o.pulse_width = params.pulse_width;
+                NodeDsp::Osc(o)
+            }
+            Kind::SawOsc => {
+                let mut o = Osc::new(Waveform::Saw, params.freq, sample_rate);
+                o.pulse_width = params.pulse_width;
+                NodeDsp::Osc(o)
+            }
+            Kind::SquareOsc => {
+                let mut o = Osc::new(Waveform::Square, params.freq, sample_rate);
                 o.pulse_width = params.pulse_width;
                 NodeDsp::Osc(o)
             }
@@ -147,6 +180,12 @@ impl Node {
                 f.set_cutoff(params.cutoff);
                 f.set_resonance(params.resonance);
                 NodeDsp::Filter(f)
+            }
+            Kind::AcidFilter => {
+                let mut f = AcidFilter::new(sample_rate);
+                f.set_cutoff(params.cutoff);
+                f.set_resonance(params.resonance);
+                NodeDsp::AcidFilter(f)
             }
             Kind::Distortion => {
                 let mut d = Distortion::new();
@@ -170,7 +209,7 @@ impl Node {
     /// Returns true if this node is the audio sink (Out).
     fn process(&mut self, inputs: &[f32], out: &mut [f32]) -> bool {
         match self.kind {
-            Kind::Osc => {
+            Kind::SquareOsc | Kind::SawOsc | Kind::SineOsc | Kind::Osc => {
                 if let NodeDsp::Osc(o) = &mut self.dsp {
                     let cv = inputs.first().copied().unwrap_or(0.0);
                     o.freq = self.params.freq * (2.0f32).powf(cv);
@@ -178,6 +217,7 @@ impl Node {
                 }
                 false
             }
+
             Kind::Adsr => {
                 if let NodeDsp::Adsr(e) = &mut self.dsp {
                     let gate = inputs.first().copied().unwrap_or(0.0);
@@ -203,6 +243,16 @@ impl Node {
                 }
                 false
             }
+            Kind::AcidFilter => {
+                if let NodeDsp::AcidFilter(f) = &mut self.dsp {
+                    let sig = inputs.first().copied().unwrap_or(0.0);
+                    let cv = inputs.get(1).copied().unwrap_or(0.0);
+                    let cutoff = self.params.cutoff * (2.0f32).powf(cv);
+                    f.set_cutoff(cutoff);
+                    out[0] = f.process(sig);
+                }
+                false
+            }
             Kind::Distortion => {
                 if let NodeDsp::Distortion(d) = &mut self.dsp {
                     let sig = inputs.first().copied().unwrap_or(0.0);
@@ -220,11 +270,13 @@ impl Node {
                 let a = inputs.first().copied().unwrap_or(0.0);
                 let b = inputs.get(1).copied().unwrap_or(0.0);
                 let c = inputs.get(2).copied().unwrap_or(0.0);
+                let d = inputs.get(3).copied().unwrap_or(0.0);
+
                 // Scale by the number of connected inputs so summing multiple
                 // sources doesn't immediately push the signal past full scale.
                 let mut n = 0u32;
                 let mut sum = 0.0f32;
-                for v in [a, b, c] {
+                for v in [a, b, c, d] {
                     sum += v;
                     n += 1;
                 }
@@ -262,6 +314,10 @@ impl Node {
                 }
                 _ => {}
             },
+            Kind::SineOsc | Kind::SawOsc | Kind::SquareOsc => match name {
+                "freq" => self.params.freq = v,
+                _ => {}
+            },
             Kind::Adsr => {
                 if let NodeDsp::Adsr(e) = &mut self.dsp {
                     match name {
@@ -278,6 +334,16 @@ impl Node {
                 "resonance" => {
                     self.params.resonance = v;
                     if let NodeDsp::Filter(f) = &mut self.dsp {
+                        f.set_resonance(v);
+                    }
+                }
+                _ => {}
+            },
+            Kind::AcidFilter => match name {
+                "cutoff" => self.params.cutoff = v,
+                "resonance" => {
+                    self.params.resonance = v;
+                    if let NodeDsp::AcidFilter(f) = &mut self.dsp {
                         f.set_resonance(v);
                     }
                 }
@@ -316,10 +382,10 @@ pub struct GraphEngine {
     nodes: Vec<Option<Node>>,
     edges: Vec<(u32, u32, u32, u32)>, // from, from_port, to, to_port
     // Rebuilt on mutation (dense, allocation-free to read in process):
-    order: Vec<u32>, // node ids in topological order
+    order: Vec<u32>,                          // node ids in topological order
     input_sources: Vec<Vec<Vec<(u32, u32)>>>, // [id][input_port] -> sources
-    current_out: Vec<Vec<f32>>, // [id][output_port]
-    out_ids: Vec<u32>, // ids of Out nodes (sinks)
+    current_out: Vec<Vec<f32>>,               // [id][output_port]
+    out_ids: Vec<u32>,                        // ids of Out nodes (sinks)
 }
 
 /// Master soft-clip + output headroom.
@@ -331,7 +397,7 @@ pub struct GraphEngine {
 /// limiter so overloads saturate smoothly, and we scale the signal to leave
 /// headroom (the limiter's linear region sits well below 0 dBFS).
 const MASTER_HEADROOM: f32 = 0.5; // nominal level ≤ ±0.5 → well under full scale
-const LIMITER_DRIVE: f32 = 2.2;   // gently raises the soft-knee saturation point
+const LIMITER_DRIVE: f32 = 2.2; // gently raises the soft-knee saturation point
 
 #[inline]
 fn master_limiter(x: f32) -> f32 {
@@ -383,8 +449,7 @@ impl GraphEngine {
         }
         self.nodes[i] = None;
         self.current_out[i] = Vec::new();
-        self.edges
-            .retain(|&(f, _, t, _)| f != id && t != id);
+        self.edges.retain(|&(f, _, t, _)| f != id && t != id);
         self.rebuild();
     }
 
@@ -404,8 +469,7 @@ impl GraphEngine {
     }
 
     pub fn disconnect(&mut self, from: u32, from_port: u32, to: u32, to_port: u32) {
-        self.edges
-            .retain(|&e| e != (from, from_port, to, to_port));
+        self.edges.retain(|&e| e != (from, from_port, to, to_port));
         self.rebuild();
     }
 
@@ -513,9 +577,9 @@ impl GraphEngine {
         true
     }
 
-/// Render `out.len()` samples into `out`. If there are multiple Out nodes,
-/// their signals are summed, then run through the master soft-clip limiter.
-pub fn process(&mut self, out: &mut [f32]) {
+    /// Render `out.len()` samples into `out`. If there are multiple Out nodes,
+    /// their signals are summed, then run through the master soft-clip limiter.
+    pub fn process(&mut self, out: &mut [f32]) {
         if self.order.is_empty() {
             for s in out.iter_mut() {
                 *s = 0.0;
@@ -624,8 +688,16 @@ mod tests {
         let mut buf2 = vec![0.0f32; SR as usize];
         g.process(&mut buf2);
 
-        let min1 = buf1.iter().skip(SR as usize * 3 / 4).cloned().fold(f32::MAX, f32::min);
-        let min2 = buf2.iter().skip(SR as usize / 4).cloned().fold(f32::MAX, f32::min);
+        let min1 = buf1
+            .iter()
+            .skip(SR as usize * 3 / 4)
+            .cloned()
+            .fold(f32::MAX, f32::min);
+        let min2 = buf2
+            .iter()
+            .skip(SR as usize / 4)
+            .cloned()
+            .fold(f32::MAX, f32::min);
         assert!(
             min1 > 0.4 && min2 > 0.4,
             "env collapsed (min1={min1}, min2={min2}) — repeated note_on retriggered it"
@@ -636,7 +708,11 @@ mod tests {
         // release defaults to 0.3s; wait well past it.
         let mut rel = vec![0.0f32; (SR * 2.0) as usize];
         g.process(&mut rel);
-        assert!(rel.iter().rev().take(SR as usize / 10).all(|s| s.abs() < 0.01));
+        assert!(rel
+            .iter()
+            .rev()
+            .take(SR as usize / 10)
+            .all(|s| s.abs() < 0.01));
         g.note_on(0, 60, 127);
         let mut buf3 = vec![0.0f32; SR as usize];
         g.process(&mut buf3);
