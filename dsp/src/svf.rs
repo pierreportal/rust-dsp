@@ -10,6 +10,7 @@ pub enum FilterMode {
     Notch,
 }
 
+#[derive(Clone, Copy)]
 pub struct Svf {
     pub sample_rate: f32,
     pub cutoff: f32,

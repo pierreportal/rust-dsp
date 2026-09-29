@@ -1,4 +1,4 @@
-use crate::params::Params;
+use crate::params::{NoteEvent, Params};
 use midir::{Ignore, MidiInput};
 use std::sync::Arc;
 
@@ -66,12 +66,64 @@ fn key_on(midi_note: u8, vel: u8, state: &Params) {
     state.set_gate(1);
     state.set_vel(vel);
     state.set_midi(midi_note);
+    state.push_note(NoteEvent::on(midi_note, vel));
 }
 
 fn key_off(midi_note: u8, state: &Params) {
+    state.push_note(NoteEvent::off(midi_note));
+
     let active_midi_note = state.get_midi();
     if midi_note == active_midi_note {
         state.set_gate(0);
         state.set_vel(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chord_arrives_as_one_note_event_per_key() {
+        let state = Params::new();
+
+        handle_midi(&state, &[0x90, 60, 100]);
+        handle_midi(&state, &[0x90, 64, 90]);
+        handle_midi(&state, &[0x90, 67, 80]);
+        handle_midi(&state, &[0x80, 64, 0]);
+
+        assert_eq!(state.pop_note(), Some(NoteEvent::on(60, 100)));
+        assert_eq!(state.pop_note(), Some(NoteEvent::on(64, 90)));
+        assert_eq!(state.pop_note(), Some(NoteEvent::on(67, 80)));
+        assert_eq!(state.pop_note(), Some(NoteEvent::off(64)));
+        assert_eq!(state.pop_note(), None);
+    }
+
+    #[test]
+    fn note_on_with_zero_velocity_releases_the_key() {
+        let state = Params::new();
+
+        handle_midi(&state, &[0x90, 60, 100]);
+        handle_midi(&state, &[0x90, 60, 0]);
+
+        assert_eq!(state.pop_note(), Some(NoteEvent::on(60, 100)));
+        assert_eq!(state.pop_note(), Some(NoteEvent::off(60)));
+    }
+
+    #[test]
+    fn releasing_a_chord_key_keeps_the_other_notes_pressed() {
+        let state = Params::new();
+
+        handle_midi(&state, &[0x90, 60, 100]);
+        handle_midi(&state, &[0x90, 67, 100]);
+        handle_midi(&state, &[0x80, 60, 0]);
+
+        assert_eq!(state.pop_note(), Some(NoteEvent::on(60, 100)));
+        assert_eq!(state.pop_note(), Some(NoteEvent::on(67, 100)));
+        assert_eq!(state.pop_note(), Some(NoteEvent::off(60)));
+
+        while state.pop_note().is_some() {}
+
+        assert_eq!(state.get_gate(), 1);
     }
 }

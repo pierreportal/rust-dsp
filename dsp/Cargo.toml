@@ -14,3 +14,4 @@ libm = "0.2"
 
 [dev-dependencies]
 hound = "3"
+rustfft = "6"

@@ -1,5 +1,6 @@
 use crate::patch::Module;
 
+#[derive(Clone, Copy)]
 pub struct Distortion {
     pub drive: f32,
     pub output_gain: f32,

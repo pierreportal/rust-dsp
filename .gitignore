@@ -1,3 +1,4 @@
 target/
 web/pkg/
 web/target/
+*.csv
