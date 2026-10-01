@@ -206,8 +206,10 @@ impl Node {
 
     /// Compute this node's outputs for one sample. `inputs` is indexed by
     /// input port; `out` is the node's output port slice (sized to outputs()).
+    /// `connected` is a bitmask of input ports that have a cable attached, so
+    /// a node can tell "patched but silent" from "not patched".
     /// Returns true if this node is the audio sink (Out).
-    fn process(&mut self, inputs: &[f32], out: &mut [f32]) -> bool {
+    fn process(&mut self, inputs: &[f32], out: &mut [f32], connected: u8) -> bool {
         match self.kind {
             Kind::SquareOsc | Kind::SawOsc | Kind::SineOsc | Kind::Osc => {
                 if let NodeDsp::Osc(o) = &mut self.dsp {
@@ -267,17 +269,18 @@ impl Node {
                 false
             }
             Kind::Mixer => {
-                let a = inputs.first().copied().unwrap_or(0.0);
-                let b = inputs.get(1).copied().unwrap_or(0.0);
-                let c = inputs.get(2).copied().unwrap_or(0.0);
-                let d = inputs.get(3).copied().unwrap_or(0.0);
-
-                // Scale by the number of connected inputs so summing multiple
-                // sources doesn't immediately push the signal past full scale.
+                // Average only the ports that actually have something patched
+                // into them, so a three-way mix stays at unity rather than
+                // being attenuated by the idle fourth input. `connected` is
+                // required: a connected-but-silent source still counts, which a
+                // "is it non-zero" test could not tell apart from no cable.
                 let mut n = 0u32;
                 let mut sum = 0.0f32;
-                for v in [a, b, c, d] {
-                    sum += v;
+                for p in 0..inputs.len() {
+                    if connected & (1 << p) == 0 {
+                        continue;
+                    }
+                    sum += inputs[p];
                     n += 1;
                 }
                 out[0] = if n > 0 { sum / n as f32 } else { 0.0 };
@@ -384,27 +387,43 @@ pub struct GraphEngine {
     // Rebuilt on mutation (dense, allocation-free to read in process):
     order: Vec<u32>,                          // node ids in topological order
     input_sources: Vec<Vec<Vec<(u32, u32)>>>, // [id][input_port] -> sources
+    input_mask: Vec<u8>,                      // [id] bitmask of patched input ports
     current_out: Vec<Vec<f32>>,               // [id][output_port]
     out_ids: Vec<u32>,                        // ids of Out nodes (sinks)
 }
 
-/// Master soft-clip + output headroom.
+/// Soft-knee safety clipper.
 ///
-/// The raw graph can sum signals that exceed full scale (a saw at ~±1.0 times
-/// an envelope peaking at 1.0, a mixer with several inputs, multiple Out
+/// The raw graph can legitimately exceed full scale (a saw at ~±1.0 times an
+/// envelope peaking at 1.0, a mixer summing several sources, multiple Out
 /// sinks). A naive hard clamp near ±1.0 flattens the waveform tops into harsh,
-/// harmonically rich "digital" distortion. Instead we apply a soft-knee tanh
-/// limiter so overloads saturate smoothly, and we scale the signal to leave
-/// headroom (the limiter's linear region sits well below 0 dBFS).
-const MASTER_HEADROOM: f32 = 0.5; // nominal level ≤ ±0.5 → well under full scale
-const LIMITER_DRIVE: f32 = 2.2; // gently raises the soft-knee saturation point
+/// harmonically rich "digital" distortion.
+///
+/// Below `KNEE` the signal is returned bit-for-bit unchanged, so an ordinary
+/// patch is completely transparent and a pure sine stays pure. Above `KNEE` the
+/// remaining headroom is bent smoothly onto ±1.0.
+///
+/// This is a *clipper*, not a compressor: it has no envelope follower and no
+/// gain reduction over time, so a loud sustained tone is still squashed rather
+/// than ducked. It catches peaks; it does not control dynamics.
+const KNEE: f32 = 0.8;
 
 #[inline]
 fn master_limiter(x: f32) -> f32 {
-    let y = (x * MASTER_HEADROOM) as f64;
-    // tanh(x) ≈ x for small x (linear pass-through for clean signals) and
-    // saturates smoothly toward ±1 as the input grows.
-    (libm::tanh(y * LIMITER_DRIVE as f64) / libm::tanh(LIMITER_DRIVE as f64)) as f32
+    let a = x.abs();
+    if a <= KNEE {
+        return x;
+    }
+    // tanh(0) = 0 gives a slope of exactly 1 at the knee, so the join is
+    // C1-continuous; the second derivative is also 0 there, so it is C2 as
+    // well and the knee is inaudible.
+    let headroom = 1.0 - KNEE;
+    let y = KNEE + headroom * libm::tanh(((a - KNEE) / headroom) as f64) as f32;
+    if x < 0.0 {
+        -y
+    } else {
+        y
+    }
 }
 
 impl GraphEngine {
@@ -415,6 +434,7 @@ impl GraphEngine {
             edges: Vec::new(),
             order: Vec::new(),
             input_sources: Vec::new(),
+            input_mask: Vec::new(),
             current_out: Vec::new(),
             out_ids: Vec::new(),
         }
@@ -506,15 +526,18 @@ impl GraphEngine {
                 None => Vec::new(),
             })
             .collect();
+        let mut input_mask = vec![0u8; n];
         for &(f, fp, t, tp) in &self.edges {
             if let Some(port_vec) = input_sources
                 .get_mut(t as usize)
                 .and_then(|slot| slot.get_mut(tp as usize))
             {
                 port_vec.push((f, fp));
+                input_mask[t as usize] |= 1 << tp;
             }
         }
         self.input_sources = input_sources;
+        self.input_mask = input_mask;
 
         // Topological sort (Kahn) over active nodes.
         let mut indeg = vec![0u32; n];
@@ -590,6 +613,7 @@ impl GraphEngine {
         // outputs without aliasing issues.
         let order = self.order.clone();
         let input_sources = &self.input_sources;
+        let input_mask = &self.input_mask;
         let current_out = &mut self.current_out;
         let nodes = &mut self.nodes;
         let out_ids = &self.out_ids;
@@ -609,7 +633,8 @@ impl GraphEngine {
                     }
                     inp[p] = sum;
                 }
-                let is_out = node.process(&inp[..n_in], &mut current_out[id as usize]);
+                let is_out =
+                    node.process(&inp[..n_in], &mut current_out[id as usize], input_mask[id as usize]);
                 if is_out {
                     *sample += inp[0];
                 }
@@ -629,6 +654,21 @@ mod tests {
 
     const SR: f32 = 48000.0;
 
+    /// Magnitude of `freq` in `buf` (Goertzel). With `buf` one second long at
+    /// SR, bins land on whole Hz, so a tone on an exact bin has no leakage.
+    fn goertzel(buf: &[f32], freq: f32) -> f64 {
+        let n = buf.len() as f64;
+        let w = 2.0 * std::f64::consts::PI * freq as f64 / SR as f64;
+        let coeff = 2.0 * w.cos();
+        let (mut s0, mut s1, mut s2) = (0.0f64, 0.0f64, 0.0f64);
+        for &x in buf {
+            s0 = x as f64 + coeff * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        (s1 * s1 + s2 * s2 - coeff * s1 * s2).sqrt() / n * 2.0
+    }
+
     fn default_patch(g: &mut GraphEngine) {
         g.add_node(0, Kind::Midi as u32);
         g.add_node(1, Kind::Osc as u32);
@@ -640,6 +680,99 @@ mod tests {
         g.connect(1, 0, 3, 0); // osc -> vca signal
         g.connect(2, 0, 3, 1); // env -> vca gain
         g.connect(3, 0, 4, 0); // vca -> out
+    }
+
+    #[test]
+    fn master_limiter_is_bit_transparent_below_the_knee() {
+        // The safety clipper must not colour ordinary levels. Anything at or
+        // below the knee has to come back out exactly as it went in.
+        for i in 0..=800 {
+            let x = i as f32 / 1000.0;
+            assert_eq!(master_limiter(x), x, "positive {x} was altered");
+            assert_eq!(master_limiter(-x), -x, "negative {x} was altered");
+        }
+    }
+
+    #[test]
+    fn master_limiter_stays_bounded_and_monotonic() {
+        let mut prev = -1.0f32;
+        for i in 0..=4000 {
+            let x = -2.0 + i as f32 * 0.001;
+            let y = master_limiter(x);
+            assert!(y.abs() <= 1.0, "{x} -> {y} exceeds full scale");
+            assert!(y >= prev, "not monotonic at {x}: {y} < {prev}");
+            assert!(y.is_finite());
+            prev = y;
+        }
+    }
+
+    #[test]
+    fn master_limiter_knee_has_unit_slope() {
+        // tanh'(0) = 1 means the curve leaves the linear region with the same
+        // slope it arrived with, so the knee introduces no step in gain.
+        let d = 1e-4;
+        let below = (master_limiter(KNEE) - master_limiter(KNEE - d)) / d;
+        let above = (master_limiter(KNEE + d) - master_limiter(KNEE)) / d;
+        assert!(
+            (below - 1.0).abs() < 1e-3 && (above - 1.0).abs() < 1e-3,
+            "knee slope discontinuous: below={below} above={above}"
+        );
+    }
+
+    #[test]
+    fn master_limiter_never_boosts() {
+        for i in 0..=2000 {
+            let x = i as f32 * 0.001;
+            assert!(master_limiter(x) <= x, "clipper boosted {x}");
+        }
+    }
+
+    #[test]
+    fn held_sine_is_not_coloured_by_the_output_stage() {
+        // Regression: the output stage used to be an unconditional tanh
+        // saturator, which put a 3rd harmonic around -32 dBc on a held sine and
+        // read as "crushed". Drive the default patch with a note whose pitch CV
+        // is zero so the oscillator sits exactly on a 1 Hz bin, let the
+        // envelope reach sustain, and require the harmonics to stay at the f32
+        // noise floor.
+        const F0: f32 = 131.0;
+        let mut g = GraphEngine::new(SR);
+        g.add_node(0, Kind::Midi as u32);
+        g.add_node(1, Kind::SineOsc as u32);
+        g.add_node(2, Kind::Adsr as u32);
+        g.add_node(3, Kind::Vca as u32);
+        g.add_node(4, Kind::Out as u32);
+        g.set_param(1, "freq", F0);
+        g.set_param(2, "attack", 0.001);
+        g.set_param(2, "decay", 0.001);
+        g.connect(0, 1, 1, 0);
+        g.connect(0, 0, 2, 0);
+        g.connect(1, 0, 3, 0);
+        g.connect(2, 0, 3, 1);
+        g.connect(3, 0, 4, 0);
+        g.note_on(0, 69, 127); // A4 -> pitch cv 0 -> freq stays F0
+
+        let mut buf = vec![0.0f32; SR as usize * 2];
+        g.process(&mut buf);
+        let sustain = &buf[SR as usize..];
+
+        let fundamental = goertzel(sustain, F0);
+        assert!(fundamental > 0.5, "note not audible: {fundamental}");
+        for k in 2..=5 {
+            let db = 20.0 * (goertzel(sustain, F0 * k as f32) / fundamental).log10();
+            assert!(
+                db < -90.0,
+                "harmonic {k} at {db:.1} dBc - the output stage is colouring the signal"
+            );
+        }
+
+        // A sine at sustain level must keep its own peak, i.e. nothing is
+        // saturating it.
+        let peak = sustain.iter().fold(0.0f32, |a, &s| a.max(s.abs()));
+        assert!(
+            (peak - 0.7).abs() < 0.01,
+            "sustain peak {peak} should be the 0.7 envelope level"
+        );
     }
 
     #[test]
