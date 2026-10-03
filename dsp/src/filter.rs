@@ -1,12 +1,19 @@
 use crate::patch::Module;
 use crate::smoother::Smoother;
 
+/// A one-pole low-pass filter.
+///
+/// `cutoff` holds the requested value; `cutoff_smoother` holds the value
+/// actually in use, which glides toward it so that sweeping the cutoff cannot
+/// click. Use [`Filter::set_cutoff`] to change it, since writing the field
+/// directly would leave the two out of step.
 #[derive(Clone, Copy)]
 pub struct Filter {
     pub cutoff: f32,
     pub cutoff_smoother: Smoother,
     z: f32,
     coefficient: f32,
+    last_cutoff: f32,
     sample_rate: f32,
 }
 
@@ -19,25 +26,37 @@ impl Filter {
             cutoff_smoother: Smoother::from_time(cutoff, 0.0005, sample_rate),
             z: 0.0,
             coefficient: 0.0,
+            // NaN never compares equal to itself, so the first call always
+            // takes the branch that computes the coefficient.
+            last_cutoff: f32::NAN,
             sample_rate,
         };
 
-        filter.update_coefficient();
+        filter.update_coefficient(cutoff);
         filter
     }
     pub fn set_cutoff(&mut self, cutoff: f32) {
         self.cutoff = cutoff.clamp(1.0, self.sample_rate * 0.45);
-
-        self.update_coefficient();
+        self.cutoff_smoother.set_target(self.cutoff);
     }
 
-    fn update_coefficient(&mut self) {
-        let x = libm::expf(-2.0 * core::f32::consts::PI * self.cutoff / self.sample_rate);
+    fn update_coefficient(&mut self, cutoff: f32) {
+        // A settled parameter repeats its coefficient every sample; skipping
+        // the rebuild saves an `expf` per sample with no change in output.
+        if cutoff == self.last_cutoff {
+            return;
+        }
+        self.last_cutoff = cutoff;
+
+        let x = libm::expf(-2.0 * core::f32::consts::PI * cutoff / self.sample_rate);
 
         self.coefficient = 1.0 - x;
     }
 
     pub fn process_sample(&mut self, input: f32) -> f32 {
+        let cutoff = self.cutoff_smoother.next_sample();
+        self.update_coefficient(cutoff);
+
         self.z += self.coefficient * (input - self.z);
         self.z
     }
@@ -66,7 +85,7 @@ mod tests {
     #[test]
     fn test_filter_dc_signal() {
         let mut filter = Filter::new(SAMPLE_RATE);
-        filter.cutoff = 1000.0;
+        filter.set_cutoff(1000.0);
 
         let input = 1.0;
         let mut output = 0.0;
@@ -83,7 +102,7 @@ mod tests {
     #[test]
     fn test_filter_smoothing() {
         let mut filter = Filter::new(SAMPLE_RATE);
-        filter.cutoff = 100.0; // Low cutoff for strong smoothing
+        filter.set_cutoff(100.0); // Low cutoff for strong smoothing
 
         // Step input
         let output1 = filter.process(1.0);
@@ -99,7 +118,7 @@ mod tests {
     #[test]
     fn test_filter_attenuates_high_freq() {
         let mut filter = Filter::new(SAMPLE_RATE);
-        filter.cutoff = 100.0;
+        filter.set_cutoff(100.0);
 
         // Alternating signal (high frequency)
         let mut sum = 0.0;
@@ -149,7 +168,7 @@ mod tests {
     #[test]
     fn test_filter_negative_input() {
         let mut filter = Filter::new(SAMPLE_RATE);
-        filter.cutoff = 1000.0;
+        filter.set_cutoff(1000.0);
 
         let output = filter.process(-1.0);
 
@@ -172,7 +191,7 @@ mod tests {
     #[test]
     fn test_filter_impulse_response() {
         let mut filter = Filter::new(SAMPLE_RATE);
-        filter.cutoff = 1000.0;
+        filter.set_cutoff(1000.0);
 
         // Impulse
         let output1 = filter.process(1.0);
@@ -190,7 +209,7 @@ mod tests {
     #[test]
     fn test_filter_stability() {
         let mut filter = Filter::new(SAMPLE_RATE);
-        filter.cutoff = 10000.0; // High cutoff
+        filter.set_cutoff(10000.0); // High cutoff
 
         // Process many samples with varying input
         for i in 0..10000 {
@@ -200,5 +219,51 @@ mod tests {
             // Output should remain bounded
             assert!(output.abs() <= 1.5);
         }
+    }
+
+    #[test]
+    fn test_smoother_starts_on_the_cutoff() {
+        let filter = Filter::new(SAMPLE_RATE);
+        assert_eq!(filter.cutoff_smoother.current, filter.cutoff);
+        assert_eq!(filter.cutoff_smoother.target, filter.cutoff);
+    }
+
+    /// The smoother is there to stop a cutoff sweep from clicking, so
+    /// `process_sample` has to advance it and track its target.
+    #[test]
+    fn test_cutoff_changes_glide() {
+        let mut filter = Filter::new(SAMPLE_RATE);
+        filter.set_cutoff(8000.0);
+        for _ in 0..50000 {
+            filter.process(0.0);
+        }
+
+        filter.set_cutoff(100.0);
+        assert_eq!(filter.cutoff_smoother.target, 100.0);
+        assert!(
+            filter.cutoff_smoother.current > 7000.0,
+            "the cutoff in use jumped to {}",
+            filter.cutoff_smoother.current
+        );
+
+        for _ in 0..50000 {
+            filter.process(0.0);
+        }
+        assert!(
+            (filter.cutoff_smoother.current - 100.0).abs() < 1.0,
+            "the cutoff should reach its target, got {}",
+            filter.cutoff_smoother.current
+        );
+    }
+
+    #[test]
+    fn test_cutoff_clamped() {
+        let mut filter = Filter::new(SAMPLE_RATE);
+
+        filter.set_cutoff(100_000.0);
+        assert_eq!(filter.cutoff, SAMPLE_RATE * 0.45);
+
+        filter.set_cutoff(0.1);
+        assert_eq!(filter.cutoff, 1.0);
     }
 }
