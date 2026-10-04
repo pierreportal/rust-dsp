@@ -47,7 +47,7 @@ pub struct PatchNode {
 }
 
 /// One cable: `source`'s `source_port` output feeds `target`'s `target_port` input.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PatchEdge {
     pub source: u32,
     pub source_port: u32,
@@ -1056,3 +1056,9 @@ mod tests {
         assert_eq!(decoded.patch, patch);
     }
 }
+
+pub mod bake;
+pub use bake::{
+    apply_patch, bake, BakeError, BakedPatch, MAX_BAKED_NODE_ID, MAX_EDGES, MAX_NODES,
+    MAX_PAYLOAD_BYTES,
+};
