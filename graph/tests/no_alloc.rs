@@ -104,11 +104,55 @@ fn rendering_the_raw_voice_path_does_not_allocate() {
     assert_eq!(found, 0, "process_raw allocated {found} times in 64 blocks");
 }
 
+/// The same patch as `busy_patch`, built across every voice in the pool.
+///
+/// Without this the pool tests below are theatre: `PolyGraph::new` starts with
+/// empty engines, `note_on` finds nothing to render and returns early, and the
+/// loop measures an empty graph. It would have passed even with the original
+/// per-block `order.clone()` still in place.
+fn busy_pool() -> PolyGraph {
+    let mut voices = PolyGraph::new(SR);
+
+    let midi = 0;
+    let osc_a = 1;
+    let osc_b = 2;
+    let cc = 3;
+    let env = 4;
+    let filter = 5;
+    let shaper = 6;
+    let vca = 7;
+    let out = 8;
+
+    assert!(voices.add_node(midi, Kind::Midi as u32), "midi");
+    assert!(voices.add_node(osc_a, Kind::SineOsc as u32), "osc a");
+    assert!(voices.add_node(osc_b, Kind::SawOsc as u32), "osc b");
+    assert!(voices.add_node(cc, Kind::CC as u32), "cc");
+    assert!(voices.add_node(env, Kind::Adsr as u32), "env");
+    assert!(voices.add_node(filter, Kind::Filter as u32), "filter");
+    assert!(voices.add_node(shaper, Kind::Distortion as u32), "shaper");
+    assert!(voices.add_node(vca, Kind::Vca as u32), "vca");
+    assert!(voices.add_node(out, Kind::Out as u32), "out");
+
+    assert!(voices.connect(osc_a, 0, filter, 0), "osc a -> filter");
+    assert!(voices.connect(osc_b, 0, filter, 0), "osc b -> filter");
+    assert!(voices.connect(cc, 0, filter, 1), "cc -> filter cv");
+    assert!(voices.connect(midi, 1, osc_a, 0), "pitch cv -> osc a");
+    assert!(voices.connect(midi, 1, osc_b, 0), "pitch cv -> osc b");
+    assert!(voices.connect(midi, 0, env, 0), "gate -> env");
+    assert!(voices.connect(env, 0, vca, 1), "env -> vca cv");
+    assert!(voices.connect(filter, 0, shaper, 0), "filter -> shaper");
+    assert!(voices.connect(shaper, 0, vca, 0), "shaper -> vca signal");
+    assert!(voices.connect(vca, 0, out, 0), "vca -> out");
+
+    voices
+}
+
 #[test]
 fn the_whole_voice_pool_does_not_allocate_while_held() {
     // The realistic case: a chord, held, rendered block after block. This is the
     // loop that runs for as long as the user holds the keys.
-    let mut voices = PolyGraph::new(SR);
+    let mut voices = busy_pool();
+    voices.set_cc(74, 100);
     for note in [60u8, 64, 67] {
         voices.note_on(note, 100);
     }
@@ -133,7 +177,8 @@ fn the_whole_voice_pool_does_not_allocate_while_held() {
 fn steering_during_playback_does_not_allocate() {
     // Voice stealing and releasing run on the audio thread too, not just the
     // steady state, and they touch the voice pool's own bookkeeping.
-    let mut voices = PolyGraph::new(SR);
+    let mut voices = busy_pool();
+    voices.set_cc(74, 100);
     let mut buf = vec![0.0f32; 256];
 
     for note in 0..8u8 {
