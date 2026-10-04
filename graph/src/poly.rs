@@ -16,7 +16,6 @@
 //! native build behave the same way.
 use crate::graph::{master_limiter, GraphEngine};
 use dsp::smoother::Smoother;
-use libm::powf;
 
 /// Number of simultaneous voices. Matches the desktop/VST target.
 pub const VOICES: usize = 16;
@@ -257,6 +256,9 @@ impl PolyGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Same math as the audio path, so these assertions check production output
+    // rather than a slightly different reference.
+    use libm::powf;
 
     const SR: f32 = 48000.0;
 
