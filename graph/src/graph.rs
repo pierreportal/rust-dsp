@@ -503,9 +503,23 @@ impl GraphEngine {
         self.rebuild();
     }
 
+    /// Connect `from`'s output port to `to`'s input port.
+    ///
+    /// Returns false and does nothing if the cable cannot be rendered: a
+    /// self-loop, a missing endpoint, a port out of range, or a cycle.
+    ///
+    /// The endpoint and port checks are load-bearing, not defensive tidiness.
+    /// Accepting a cable with a nonexistent endpoint used to panic inside
+    /// `rebuild`, and a bad *source* port survived into `input_sources` and
+    /// panicked later during `process` -- on the audio thread, where a panic
+    /// takes down a DAW session. Both were reachable from a decoded patch, which
+    /// is the untrusted input a baked plugin accepts.
     pub fn connect(&mut self, from: u32, from_port: u32, to: u32, to_port: u32) -> bool {
         if from == to {
             return false; // no self-loops
+        }
+        if !self.port_exists(from, from_port, true) || !self.port_exists(to, to_port, false) {
+            return false;
         }
         self.edges.push((from, from_port, to, to_port));
         if self.rebuild() {
@@ -516,6 +530,19 @@ impl GraphEngine {
             self.rebuild();
             false
         }
+    }
+
+    /// Whether `id` is a live node with a port `port` on the given side.
+    fn port_exists(&self, id: u32, port: u32, output: bool) -> bool {
+        let Some(node) = self.nodes.get(id as usize).and_then(|n| n.as_ref()) else {
+            return false;
+        };
+        let count = if output {
+            node.kind.outputs().len()
+        } else {
+            node.kind.inputs().len()
+        };
+        (port as usize) < count
     }
 
     pub fn disconnect(&mut self, from: u32, from_port: u32, to: u32, to_port: u32) {
@@ -597,12 +624,17 @@ impl GraphEngine {
             .collect();
         let mut input_mask = vec![0u8; n];
         for &(f, fp, t, tp) in &self.edges {
+            // Both endpoints are validated, not just the target. A source port
+            // out of range would otherwise be stored here and index past the
+            // end of `current_out` during `process`.
             if let Some(port_vec) = input_sources
                 .get_mut(t as usize)
                 .and_then(|slot| slot.get_mut(tp as usize))
             {
-                port_vec.push((f, fp));
-                input_mask[t as usize] |= 1 << tp;
+                if self.port_exists(f, fp, true) {
+                    port_vec.push((f, fp));
+                    input_mask[t as usize] |= 1 << tp;
+                }
             }
         }
         self.input_sources = input_sources;
@@ -617,8 +649,12 @@ impl GraphEngine {
                 active.push(i as u32);
             }
         }
+        // `get` rather than indexing: edges can predate a node's removal, and
+        // this runs on every structural edit.
         for &(f, _, t, _) in &self.edges {
-            if self.nodes[f as usize].is_some() && self.nodes[t as usize].is_some() {
+            if self.nodes.get(f as usize).is_some_and(|n| n.is_some())
+                && self.nodes.get(t as usize).is_some_and(|n| n.is_some())
+            {
                 adj[f as usize].push(t);
                 indeg[t as usize] += 1;
             }
@@ -708,7 +744,13 @@ impl GraphEngine {
         for sample in out.iter_mut() {
             *sample = 0.0;
             for &id in order {
-                let node = nodes[id as usize].as_mut().unwrap();
+                // Invariant from `rebuild`: `order` only holds ids with a live
+                // node, and the per-node buffers are sized in the same pass. A
+                // missing entry would mean those two disagree, which is a bug
+                // worth dropping a sample over rather than panicking a host on.
+                let Some(Some(node)) = nodes.get_mut(id as usize) else {
+                    continue;
+                };
                 let srcs = &input_sources[id as usize];
                 let n_in = srcs.len();
                 // Read inputs (sum of connected output ports).

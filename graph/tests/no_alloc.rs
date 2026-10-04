@@ -49,8 +49,8 @@ fn busy_patch() -> GraphEngine {
     assert!(g.connect(osc_a, 0, filter, 0), "osc a -> filter");
     assert!(g.connect(osc_b, 0, filter, 0), "osc b -> filter");
     assert!(g.connect(cc, 0, filter, 1), "cc -> filter cv");
-    assert!(g.connect(midi, 1, osc_a, 1), "pitch cv -> osc a");
-    assert!(g.connect(midi, 1, osc_b, 1), "pitch cv -> osc b");
+    assert!(g.connect(midi, 1, osc_a, 0), "pitch cv -> osc a");
+    assert!(g.connect(midi, 1, osc_b, 0), "pitch cv -> osc b");
     assert!(g.connect(midi, 0, env, 0), "gate -> env");
     assert!(g.connect(env, 0, vca, 1), "env -> vca cv");
     assert!(g.connect(filter, 0, shaper, 0), "filter -> shaper");
