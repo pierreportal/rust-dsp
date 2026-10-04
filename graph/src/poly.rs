@@ -16,6 +16,7 @@
 //! native build behave the same way.
 use crate::graph::{master_limiter, GraphEngine};
 use dsp::smoother::Smoother;
+use libm::powf;
 
 /// Number of simultaneous voices. Matches the desktop/VST target.
 pub const VOICES: usize = 16;
@@ -277,7 +278,7 @@ mod tests {
 
     /// Pitch the graph will actually produce for `note`, given a base of 440.
     fn played_hz(note: u8) -> f32 {
-        440.0 * 2.0f32.powf((note as f32 - 69.0) / 12.0)
+        440.0 * powf(2.0f32, (note as f32 - 69.0) / 12.0)
     }
 
     /// A three-partial-friendly voice: one sine per note so spectral checks are

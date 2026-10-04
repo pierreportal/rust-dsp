@@ -10,6 +10,7 @@ use dsp::distortion::Distortion;
 use dsp::osc::{Osc, Waveform};
 use dsp::patch::Module;
 use dsp::svf::Svf;
+use libm::powf;
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -233,7 +234,7 @@ impl Node {
             Kind::SquareOsc | Kind::SawOsc | Kind::SineOsc | Kind::Osc => {
                 if let NodeDsp::Osc(o) = &mut self.dsp {
                     let cv = inputs.first().copied().unwrap_or(0.0);
-                    o.freq = self.params.freq * (2.0f32).powf(cv);
+                    o.freq = self.params.freq * powf(2.0f32, cv);
                     out[0] = o.next_sample();
                 }
                 false
@@ -258,7 +259,7 @@ impl Node {
                 if let NodeDsp::Filter(f) = &mut self.dsp {
                     let sig = inputs.first().copied().unwrap_or(0.0);
                     let cv = inputs.get(1).copied().unwrap_or(0.0);
-                    let cutoff = self.params.cutoff * (2.0f32).powf(cv);
+                    let cutoff = self.params.cutoff * powf(2.0f32, cv);
                     f.set_cutoff(cutoff);
                     out[0] = f.process(sig);
                 }
@@ -268,7 +269,7 @@ impl Node {
                 if let NodeDsp::AcidFilter(f) = &mut self.dsp {
                     let sig = inputs.first().copied().unwrap_or(0.0);
                     let cv = inputs.get(1).copied().unwrap_or(0.0);
-                    let cutoff = self.params.cutoff * (2.0f32).powf(cv);
+                    let cutoff = self.params.cutoff * powf(2.0f32, cv);
                     f.set_cutoff(cutoff);
                     out[0] = f.process(sig);
                 }

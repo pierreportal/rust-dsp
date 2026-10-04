@@ -13,9 +13,12 @@
 //!
 //! Nothing here knows about wasm, audio devices or windowing. Hosts own that.
 //!
-//! Still `std`-only because the engine leans on `VecDeque`/`powf` and has
-//! unchecked indexing on the audio thread. Both are tracked for cleanup before
-//! the plugin and firmware targets.
+//! Still `std`-only because the engine leans on `VecDeque` and on
+//! allocator-backed collections for graph editing. Transcendentals come from
+//! `libm` rather than `std` so they stay bit-identical across the wasm, plugin
+//! and firmware targets, which each have their own `libm` implementation.
+//! Parameter mutation by name (`set_param`) is a string lookup and is only for
+//! the editing path; a host's automation should address parameters by id.
 pub mod graph;
 pub mod poly;
 pub mod registry;
