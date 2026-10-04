@@ -27,6 +27,7 @@ pub enum Kind {
     SineOsc = 10,
     SawOsc = 11,
     SquareOsc = 12,
+    CC = 13,
 }
 
 impl Kind {
@@ -45,6 +46,7 @@ impl Kind {
             10 => Some(Kind::SineOsc),
             11 => Some(Kind::SawOsc),
             12 => Some(Kind::SquareOsc),
+            13 => Some(Kind::CC),
             _ => None,
         }
     }
@@ -61,6 +63,7 @@ impl Kind {
             Kind::Constant => &[],
             Kind::Out => &["signal"],
             Kind::Midi => &[],
+            Kind::CC => &[],
             Kind::SineOsc => &["freq cv"],
             Kind::SawOsc => &["freq cv"],
             Kind::SquareOsc => &["freq cv"],
@@ -79,6 +82,7 @@ impl Kind {
             Kind::Constant => &["value"],
             Kind::Out => &[],
             Kind::Midi => &["gate", "pitch cv"],
+            Kind::CC => &["value"],
             Kind::SineOsc => &["signal"],
             Kind::SawOsc => &["signal"],
             Kind::SquareOsc => &["signal"],
@@ -100,6 +104,11 @@ pub struct Params {
     pub resonance: f32,
     pub drive: f32,
     pub value: f32, // constant node output
+    /// Which MIDI controller a `CC` node reads.
+    pub cc: f32,
+    /// Bipolar modulation depth in octaves for a `CC` node, so its output lines
+    /// up with the `2^cv` convention the other CV inputs already use.
+    pub depth: f32,
 }
 
 impl Params {
@@ -116,6 +125,8 @@ impl Params {
             resonance: 0.2,
             drive: 4.0,
             value: 0.5,
+            cc: 74.0,
+            depth: 2.0,
         };
         match kind {
             Kind::Midi => Params { value: 0.0, ..base },
@@ -141,6 +152,10 @@ pub struct Node {
     pub gated: bool,     // ADSR gate tracking
     pub midi_note: u8,   // last MIDI note
     pub midi_gate: bool, // MIDI gate on/off
+    /// Last controller value seen by a `CC` node, already centred to -1..=1 so
+    /// that an unpatched controller sits at zero (no modulation) rather than at
+    /// full negative depth.
+    pub cc_bipolar: f32,
 }
 
 impl Node {
@@ -201,6 +216,7 @@ impl Node {
             gated: false,
             midi_note: 69,
             midi_gate: false,
+            cc_bipolar: 0.0,
         }
     }
 
@@ -296,6 +312,13 @@ impl Node {
                 out[1] = (self.midi_note as f32 - 69.0) / 12.0;
                 false
             }
+            Kind::CC => {
+                // Bipolar, scaled in octaves: the same `2^cv` convention the
+                // pitch and cutoff CV inputs already expect, so a controller
+                // sweeps symmetrically instead of only ever brightening.
+                out[0] = self.cc_bipolar * self.params.depth;
+                false
+            }
         }
     }
 
@@ -365,6 +388,11 @@ impl Node {
                     self.params.value = v;
                 }
             }
+            Kind::CC => match name {
+                "cc" => self.params.cc = v,
+                "depth" => self.params.depth = v,
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -409,7 +437,7 @@ pub struct GraphEngine {
 const KNEE: f32 = 0.8;
 
 #[inline]
-fn master_limiter(x: f32) -> f32 {
+pub fn master_limiter(x: f32) -> f32 {
     let a = x.abs();
     if a <= KNEE {
         return x;
@@ -516,6 +544,45 @@ impl GraphEngine {
         }
     }
 
+    /// Gate every Midi node in this graph with a note-on.
+    ///
+    /// A `Midi` node holds a single note/gate pair, so one engine can only ever
+    /// play one pitch. The poly voice pool calls this on a single voice to give
+    /// that voice its own pitch, which is why a patch with several Midi nodes
+    /// still moves in lockstep rather than splitting the pitch across them.
+    pub fn note_on_all(&mut self, note: u8) {
+        for node in self.nodes.iter_mut().flatten() {
+            if node.kind == Kind::Midi {
+                node.midi_note = note;
+                node.midi_gate = true;
+            }
+        }
+    }
+
+    /// Release every Midi node in this graph.
+    pub fn note_off_all(&mut self) {
+        for node in self.nodes.iter_mut().flatten() {
+            if node.kind == Kind::Midi {
+                node.midi_gate = false;
+            }
+        }
+    }
+
+    /// Feed a controller value to every `CC` node tuned to that controller.
+    ///
+    /// Unlike notes, this is broadcast to *all* matching modules rather than
+    /// routed to one voice: a controller is a modulation source, not something
+    /// a single voice owns, so two `CC` nodes reading CC 74 both move and the
+    /// value survives a voice being stolen. The value is centred to -1..=1
+    /// here so `Node::process` only has to apply depth.
+    pub fn set_cc(&mut self, cc: u8, value: u8) {
+        for node in self.nodes.iter_mut().flatten() {
+            if node.kind == Kind::CC && node.params.cc.round() as i32 == cc as i32 {
+                node.cc_bipolar = (value as f32 / 127.0) * 2.0 - 1.0;
+            }
+        }
+    }
+
     /// Rebuild dense structures + topological order. Returns false on cycle.
     fn rebuild(&mut self) -> bool {
         let n = self.nodes.len();
@@ -603,6 +670,24 @@ impl GraphEngine {
     /// Render `out.len()` samples into `out`. If there are multiple Out nodes,
     /// their signals are summed, then run through the master soft-clip limiter.
     pub fn process(&mut self, out: &mut [f32]) {
+        self.render(out);
+        for s in out.iter_mut() {
+            *s = master_limiter(*s);
+        }
+    }
+
+    /// Render `out.len()` samples into `out` with no output limiting.
+    ///
+    /// The poly voice pool needs this: it sums several independent copies of the
+    /// graph and then clips the *mix* once. Letting `process` limit each voice
+    /// first would squash every voice against full scale on its own, which
+    /// changes the sound and makes the mix depend on how the voices are spread.
+    pub fn process_raw(&mut self, out: &mut [f32]) {
+        self.render(out);
+    }
+
+    /// Render one block, summing every Out node, without limiting.
+    fn render(&mut self, out: &mut [f32]) {
         if self.order.is_empty() {
             for s in out.iter_mut() {
                 *s = 0.0;
@@ -616,7 +701,6 @@ impl GraphEngine {
         let input_mask = &self.input_mask;
         let current_out = &mut self.current_out;
         let nodes = &mut self.nodes;
-        let out_ids = &self.out_ids;
 
         for sample in out.iter_mut() {
             *sample = 0.0;
@@ -639,11 +723,6 @@ impl GraphEngine {
                     *sample += inp[0];
                 }
             }
-            for &oid in out_ids {
-                // already summed via is_out path; nothing more
-                let _ = oid;
-            }
-            *sample = master_limiter(*sample);
         }
     }
 }
@@ -876,5 +955,98 @@ mod tests {
             (v - master_limiter(1.0)).abs() < 1e-3,
             "mixer output unexpected: {v}"
         );
+    }
+
+    /// A CC module is a modulation source: its output must sit at zero until a
+    /// controller moves, then swing symmetrically so it can brighten *and*
+    /// darken a destination relative to the knob's own value.
+    ///
+    /// These assertions read the raw graph output rather than the mixed output:
+    /// the master soft-clipper caps at full scale, so +2 octaves would arrive
+    /// clamped to ~1.0 and the symmetry being tested would be destroyed.
+    #[test]
+    fn cc_node_is_centred_until_a_controller_moves() {
+        let mut g = GraphEngine::new(SR);
+        g.add_node(0, Kind::CC as u32);
+        g.add_node(1, Kind::Mixer as u32);
+        g.add_node(2, Kind::Out as u32);
+        g.set_param(0, "depth", 2.0);
+        g.connect(0, 0, 1, 0);
+        g.connect(1, 0, 2, 0);
+
+        // No controller message yet: no modulation.
+        let mut rest = vec![0.0f32; 64];
+        g.process_raw(&mut rest);
+        assert!(
+            rest.iter().all(|&s| s.abs() < 1e-7),
+            "unpatched controller should not modulate"
+        );
+
+        // Full up -> +depth octaves, full down -> -depth octaves.
+        g.set_cc(74, 127);
+        let mut up = vec![0.0f32; 64];
+        g.process_raw(&mut up);
+        assert!(
+            (up[0] - 2.0).abs() < 1e-6,
+            "CC 127 should be +2 octaves, got {}",
+            up[0]
+        );
+
+        g.set_cc(74, 0);
+        let mut down = vec![0.0f32; 64];
+        g.process_raw(&mut down);
+        assert!(
+            (down[0] + 2.0).abs() < 1e-6,
+            "CC 0 should be -2 octaves, got {}",
+            down[0]
+        );
+
+        // Centre of the controller travel is no modulation.
+        g.set_cc(74, 64);
+        let mut centre = vec![0.0f32; 64];
+        g.process_raw(&mut centre);
+        assert!(centre[0].abs() < 0.05, "mid CC should be near zero");
+
+        // Depth scales the swing and can be closed entirely.
+        g.set_param(0, "depth", 0.0);
+        let mut closed = vec![0.0f32; 64];
+        g.process_raw(&mut closed);
+        assert!(closed[0].abs() < 1e-7, "depth 0 should mute modulation");
+    }
+
+    /// A controller must only reach the modules tuned to its own number, so two
+    /// CC modules can read two different controllers without interfering.
+    #[test]
+    fn cc_nodes_only_respond_to_their_own_controller() {
+        let mut g = GraphEngine::new(SR);
+        g.add_node(0, Kind::CC as u32); // CC 74
+        g.add_node(1, Kind::CC as u32); // CC 71
+        g.add_node(2, Kind::Mixer as u32);
+        g.add_node(3, Kind::Out as u32);
+        g.set_param(0, "cc", 74.0);
+        g.set_param(0, "depth", 1.0);
+        g.set_param(1, "cc", 71.0);
+        g.set_param(1, "depth", 1.0);
+        g.connect(0, 0, 2, 0);
+        g.connect(1, 0, 2, 1);
+        g.connect(2, 0, 3, 0);
+
+        g.set_cc(74, 127);
+        g.set_cc(71, 0);
+
+        // Both inputs are patched, so the mixer averages them: (+1 + -1) / 2.
+        let mut buf = vec![0.0f32; 64];
+        g.process(&mut buf);
+        assert!(
+            buf[0].abs() < 1e-6,
+            "the two controllers should cancel, got {}",
+            buf[0]
+        );
+
+        // Moving only CC 71 must move the mix.
+        g.set_cc(71, 127);
+        let mut buf2 = vec![0.0f32; 64];
+        g.process(&mut buf2);
+        assert!(buf2[0] > 0.9, "CC 71 had no effect: {}", buf2[0]);
     }
 }

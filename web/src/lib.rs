@@ -4,9 +4,10 @@
 //! from an AudioWorklet processor (see `web/ui/public/graph-processor.js`);
 //! the React UI mirrors its node/edge state into the worklet via messages.
 pub mod graph;
+pub mod poly;
 pub mod registry;
 
-use graph::GraphEngine;
+use poly::PolyGraph;
 use registry::registry_json;
 use wasm_bindgen::prelude::*;
 
@@ -18,9 +19,12 @@ pub fn registry_json_js() -> String {
     registry_json()
 }
 
+/// A polyphonic patch graph: a fixed pool of `VOICES` identical graph copies,
+/// one per held note. Structural mutations are broadcast to every voice; a
+/// note-on is routed to a single voice so each note has its own pitch.
 #[wasm_bindgen]
 pub struct Graph {
-    eng: GraphEngine,
+    eng: PolyGraph,
 }
 
 #[wasm_bindgen]
@@ -28,7 +32,7 @@ impl Graph {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: f32) -> Graph {
         Graph {
-            eng: GraphEngine::new(sample_rate),
+            eng: PolyGraph::new(sample_rate),
         }
     }
 
@@ -57,17 +61,26 @@ impl Graph {
         self.eng.set_param(id, name, value);
     }
 
-    /// Drive a Midi node (id) with a note-on.
-    pub fn note_on(&mut self, id: u32, note: u8, vel: u8) {
-        self.eng.note_on(id, note, vel);
+    /// Play a note: allocated to one voice, which drives every Midi node in
+    /// that voice's copy of the graph.
+    pub fn note_on(&mut self, note: u8, vel: u8) {
+        self.eng.note_on(note, vel);
     }
 
-    pub fn note_off(&mut self, id: u32) {
-        self.eng.note_off(id);
+    /// Release the voice (if any) currently holding `note`.
+    pub fn note_off(&mut self, note: u8) {
+        self.eng.note_off(note);
     }
 
     /// Render `out.len()` samples into `out`. Called once per audio block.
     pub fn process(&mut self, out: &mut [f32]) {
         self.eng.process(out);
+    }
+
+    /// Feed a MIDI controller value (0-127) to every Controller module tuned to
+    /// `cc`. Controllers are patchable sources, so the UI routes these
+    /// unconditionally rather than picking a voice.
+    pub fn set_cc(&mut self, cc: u8, value: u8) {
+        self.eng.set_cc(cc, value);
     }
 }

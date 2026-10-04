@@ -38,6 +38,7 @@ fn color(kind: Kind) -> &'static str {
         Kind::Constant => "#64748b",
         Kind::Out => "#ef4444",
         Kind::Midi => "#ec4899",
+        Kind::CC => "#84cc16",
     }
 }
 
@@ -45,6 +46,7 @@ fn color(kind: Kind) -> &'static str {
 fn palette_order() -> &'static [Kind] {
     &[
         Kind::Midi,
+        Kind::CC,
         Kind::Osc,
         Kind::SineOsc,
         Kind::SquareOsc,
@@ -190,6 +192,26 @@ fn params(kind: Kind) -> &'static [ParamSpec] {
         }],
         Kind::Out => EMPTY,
         Kind::Midi => EMPTY,
+        // `cc` picks the controller; `depth` is the bipolar sweep range in
+        // octaves, which matches the `2^cv` convention of the CV inputs.
+        Kind::CC => &[
+            ParamSpec {
+                name: "cc",
+                label: "CC number",
+                min: 0.0,
+                max: 127.0,
+                step: 1.0,
+                default: 74.0,
+            },
+            ParamSpec {
+                name: "depth",
+                label: "depth (oct)",
+                min: 0.0,
+                max: 4.0,
+                step: 0.05,
+                default: 2.0,
+            },
+        ],
     }
 }
 
@@ -208,6 +230,7 @@ fn label(kind: Kind) -> &'static str {
         Kind::Constant => "Constant",
         Kind::Out => "Output",
         Kind::Midi => "MIDI / CV",
+        Kind::CC => "Controller",
     }
 }
 
