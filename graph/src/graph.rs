@@ -697,8 +697,9 @@ impl GraphEngine {
             return;
         }
         // Borrow fields disjointly so the loop body can read sources + write
-        // outputs without aliasing issues.
-        let order = self.order.clone();
+        // outputs without aliasing issues. `order` is borrowed, not cloned: a
+        // clone here allocated a Vec on every audio block.
+        let order = &self.order;
         let input_sources = &self.input_sources;
         let input_mask = &self.input_mask;
         let current_out = &mut self.current_out;
@@ -706,7 +707,7 @@ impl GraphEngine {
 
         for sample in out.iter_mut() {
             *sample = 0.0;
-            for &id in &order {
+            for &id in order {
                 let node = nodes[id as usize].as_mut().unwrap();
                 let srcs = &input_sources[id as usize];
                 let n_in = srcs.len();
