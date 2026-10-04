@@ -23,7 +23,10 @@ pub struct ParamSpec {
 }
 
 /// A colour for each module kind, as served to the UI palette/canvas.
-fn color(kind: Kind) -> &'static str {
+///
+/// Also read directly by native hosts (the desktop app's palette), so a new
+/// module shows up with a sensible colour without any host-side edits.
+pub fn color(kind: Kind) -> &'static str {
     match kind {
         Kind::Osc => "#3b82f6",
         Kind::SineOsc => "#3b82f6",
@@ -43,7 +46,7 @@ fn color(kind: Kind) -> &'static str {
 }
 
 /// The palette ordering for the UI palette.
-fn palette_order() -> &'static [Kind] {
+pub fn palette_order() -> &'static [Kind] {
     &[
         Kind::Midi,
         Kind::CC,
@@ -173,7 +176,7 @@ fn distortion_params() -> &'static [ParamSpec] {
 
 const EMPTY: &[ParamSpec] = &[];
 
-fn params(kind: Kind) -> &'static [ParamSpec] {
+pub fn params(kind: Kind) -> &'static [ParamSpec] {
     match kind {
         Kind::Osc => osc_params(),
         Kind::SineOsc | Kind::SawOsc | Kind::SquareOsc => single_wave_osc_params(),
@@ -215,7 +218,7 @@ fn params(kind: Kind) -> &'static [ParamSpec] {
     }
 }
 
-fn label(kind: Kind) -> &'static str {
+pub fn label(kind: Kind) -> &'static str {
     match kind {
         Kind::Osc => "Oscillator",
         Kind::SineOsc => "Sine",

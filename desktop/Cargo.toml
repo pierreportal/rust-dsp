@@ -1,0 +1,14 @@
+[package]
+name = "desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone Coarse desktop synth: the shared patch graph in an egui window."
+
+[dependencies]
+graph = { path = "../graph" }
+patch = { path = "../patch" }
+
+cpal = "0.17"
+midir = { version = "0.11", default-features = false }
+eframe = "0.29"
+egui = "0.29"

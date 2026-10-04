@@ -1,14 +1,14 @@
-//! WebAssembly bindings for the rust-dsp modular patch graph.
+//! WebAssembly bindings for the shared Coarse patch graph.
 //!
 //! Compiled with `wasm-pack build --target web`. The `Graph` type is driven
 //! from an AudioWorklet processor (see `web/ui/public/graph-processor.js`);
 //! the React UI mirrors its node/edge state into the worklet via messages.
-pub mod graph;
-pub mod poly;
-pub mod registry;
-
-use poly::PolyGraph;
-use registry::registry_json;
+//!
+//! There is deliberately no engine code here: the graph lives in the `graph`
+//! crate so the desktop app, the Ableton plugin and the firmware all run the
+//! exact same synth. This crate only translates between wasm-bindgen and that
+//! shared API.
+use graph::PolyGraph;
 use wasm_bindgen::prelude::*;
 
 /// Serialized module catalogue (kind codes, ports, params). The web UI fetches
@@ -16,7 +16,7 @@ use wasm_bindgen::prelude::*;
 /// without any TS-side changes.
 #[wasm_bindgen]
 pub fn registry_json_js() -> String {
-    registry_json()
+    graph::registry::registry_json()
 }
 
 /// A polyphonic patch graph: a fixed pool of `VOICES` identical graph copies,
@@ -37,8 +37,7 @@ impl Graph {
     }
 
     /// Add a node of `kind` at the given (UI-assigned) numeric id.
-    /// Kind codes: 0 Osc, 1 Adsr, 2 Filter, 3 Distortion, 4 Vca, 5 Mixer,
-    /// 7 Constant, 8 Out, 9 Midi. Returns false on unknown kind.
+    /// Returns false on unknown kind.
     pub fn add_node(&mut self, id: u32, kind: u32) -> bool {
         self.eng.add_node(id, kind)
     }

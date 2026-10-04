@@ -5,12 +5,12 @@
 //! palette stays in sync with the Rust module definitions without a separate TS
 //! mirror.
 //!
-//! Usage: `cargo run -p web --bin gen_registry -- <out-path>`
+//! Usage: `cargo run -p graph --example gen_registry -- <out-path>`
 
+use graph::registry::registry_json;
 use std::env;
 use std::fs;
 use std::path::Path;
-use web::registry::registry_json;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

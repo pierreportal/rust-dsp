@@ -31,7 +31,10 @@ pub enum Kind {
 }
 
 impl Kind {
-    fn from_u8(k: u32) -> Option<Kind> {
+    /// The wire/native kind code for a module, or `None` if the host asked for
+    /// a kind this build does not have. Hosts use this to validate an incoming
+    /// patch without pattern-matching every variant themselves.
+    pub fn from_u8(k: u32) -> Option<Kind> {
         match k {
             0 => Some(Kind::Osc),
             1 => Some(Kind::Adsr),
@@ -292,11 +295,11 @@ impl Node {
                 // "is it non-zero" test could not tell apart from no cable.
                 let mut n = 0u32;
                 let mut sum = 0.0f32;
-                for p in 0..inputs.len() {
+                for (p, &input) in inputs.iter().enumerate() {
                     if connected & (1 << p) == 0 {
                         continue;
                     }
-                    sum += inputs[p];
+                    sum += input;
                     n += 1;
                 }
                 out[0] = if n > 0 { sum / n as f32 } else { 0.0 };
@@ -340,10 +343,9 @@ impl Node {
                 }
                 _ => {}
             },
-            Kind::SineOsc | Kind::SawOsc | Kind::SquareOsc => match name {
-                "freq" => self.params.freq = v,
-                _ => {}
-            },
+            Kind::SineOsc | Kind::SawOsc | Kind::SquareOsc if name == "freq" => {
+                self.params.freq = v
+            }
             Kind::Adsr => {
                 if let NodeDsp::Adsr(e) = &mut self.dsp {
                     match name {
@@ -717,8 +719,11 @@ impl GraphEngine {
                     }
                     inp[p] = sum;
                 }
-                let is_out =
-                    node.process(&inp[..n_in], &mut current_out[id as usize], input_mask[id as usize]);
+                let is_out = node.process(
+                    &inp[..n_in],
+                    &mut current_out[id as usize],
+                    input_mask[id as usize],
+                );
                 if is_out {
                     *sample += inp[0];
                 }
@@ -739,9 +744,9 @@ mod tests {
         let n = buf.len() as f64;
         let w = 2.0 * std::f64::consts::PI * freq as f64 / SR as f64;
         let coeff = 2.0 * w.cos();
-        let (mut s0, mut s1, mut s2) = (0.0f64, 0.0f64, 0.0f64);
+        let (mut s1, mut s2) = (0.0f64, 0.0f64);
         for &x in buf {
-            s0 = x as f64 + coeff * s1 - s2;
+            let s0 = x as f64 + coeff * s1 - s2;
             s2 = s1;
             s1 = s0;
         }

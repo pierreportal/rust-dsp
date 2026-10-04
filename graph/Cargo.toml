@@ -1,0 +1,12 @@
+[package]
+name = "graph"
+version = "0.1.0"
+edition = "2021"
+description = "Runtime patch-graph engine and polyphonic voice pool, shared by every Coarse host."
+
+[dependencies]
+dsp = { path = "../dsp" }
+libm = "0.2"
+
+[dev-dependencies]
+serde_json = "1"

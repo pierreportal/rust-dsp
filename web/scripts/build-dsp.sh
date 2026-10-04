@@ -8,6 +8,9 @@
 # workflow. The UI repo fetches the resulting `pkg` archive + registry, so a
 # new Rust module simply requires rebuilding with this script.
 #
+# The engine itself lives in the sibling `graph/` crate; this script builds
+# only the wasm bindings around it plus the shared module catalogue.
+#
 # Usage: ./scripts/build-dsp.sh [--release]
 set -euo pipefail
 
@@ -23,7 +26,7 @@ echo "==> Building wasm pkg ($PROFILE) into $PKG_DIR"
 wasm-pack build "$ROOT" --target web --$PROFILE
 
 echo "==> Generating module-registry.json"
-(cd "$ROOT" && cargo run --quiet --bin gen_registry -- "$PKG_DIR/module-registry.json")
+(cd "$ROOT/.." && cargo run --quiet -p graph --example gen_registry -- "$PKG_DIR/module-registry.json")
 
 echo "==> Done:"
 ls -lh "$PKG_DIR"

@@ -1,7 +1,10 @@
 [workspace]
 members = [
     "dsp",
+    "graph",
+    "patch",
     "host",
+    "desktop",
 ]
 
 resolver = "2"

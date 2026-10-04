@@ -199,7 +199,8 @@ impl PolyGraph {
     }
 
     fn update_gain_target(&mut self) {
-        self.gain.set_target(1.0 / (self.held().max(1) as f32).sqrt());
+        self.gain
+            .set_target(1.0 / (self.held().max(1) as f32).sqrt());
     }
 
     /// Render the mix for one block: every un-parked voice into a shared
@@ -212,7 +213,10 @@ impl PolyGraph {
         // Destructure so each field is a distinct borrow: rendering a voice
         // needs `voices` (mut) and `scratch` (mut) at the same time.
         let Self {
-            voices, scratch, gain, ..
+            voices,
+            scratch,
+            gain,
+            ..
         } = self;
         if scratch.len() != out.len() {
             scratch.resize(out.len(), 0.0);
@@ -302,7 +306,10 @@ mod tests {
         default_patch(&mut g);
         let mut buf = vec![0.0f32; 128];
         g.process(&mut buf);
-        assert!(buf.iter().all(|&s| s.abs() < 1e-7), "unpatched voice leaked");
+        assert!(
+            buf.iter().all(|&s| s.abs() < 1e-7),
+            "unpatched voice leaked"
+        );
     }
 
     #[test]

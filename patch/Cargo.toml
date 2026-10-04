@@ -1,0 +1,18 @@
+[package]
+name = "patch"
+version = "0.1.0"
+edition = "2021"
+description = "Coarse patch format v1: encode/decode of the shared #p= graph links."
+
+[dependencies]
+# std-only on purpose: patch loading is a user action, never an audio-thread
+# path, so it does not need to be embedded-friendly.
+# preserve_order keeps object keys in insertion order. The browser codec
+# builds its JSON with insertion order (v, n, e), and a shared link is a hash:
+# key order has to match or the two encoders produce different links for the
+# same patch.
+serde_json = { version = "1", features = ["preserve_order"] }
+base64 = "0.22"
+graph = { path = "../graph" }
+[dev-dependencies]
+serde_json = "1"
