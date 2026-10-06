@@ -27,6 +27,15 @@ const GAIN_SMOOTHING_SECONDS: f32 = 0.005;
 /// Consecutive silent blocks before a non-held voice is parked.
 const SILENCE_RUN: u16 = 64;
 
+/// Longest block rendered in one pass, chosen so the scratch buffer is allocated
+/// once at construction.
+///
+/// Hosts normally run 64 to 2048. 4096 covers the largest a DAW will ask for at
+/// 48 kHz with a big maximum block size setting, and anything past it is rendered
+/// in chunks rather than by growing the buffer, so the cost of being wrong here is
+/// a few extra passes over the block, not an allocation.
+const MAX_BLOCK: usize = 4096;
+
 /// Peak below which a rendered block counts as silent.
 const SILENCE_EPS: f32 = 1e-7;
 
@@ -43,6 +52,11 @@ struct Voice {
     age: u32,
     /// Consecutive silent blocks seen while not held.
     silent: u16,
+    /// Loudest sample this voice produced across the whole block being rendered.
+    ///
+    /// Accumulated across chunks so silence detection still sees one block's worth
+    /// of audio when the host asks for more samples than the scratch buffer holds.
+    block_peak: f32,
     /// A parked voice is skipped entirely until it is next allocated.
     idle: bool,
 }
@@ -50,6 +64,12 @@ struct Voice {
 pub struct PolyGraph {
     voices: Vec<Voice>,
     /// Reused render target so the audio callback allocates nothing.
+    ///
+    /// Sized once, here, to [`MAX_BLOCK`]. Growing it to whatever block size a host
+    /// happened to ask for would put an allocation on the audio thread the first
+    /// time a larger block arrived, and a host chooses block size — at project
+    /// setup, on a sample-rate change, per device. Blocks longer than this render in
+    /// chunks instead.
     scratch: Vec<f32>,
     gain: Smoother,
     next_age: u32,
@@ -67,11 +87,12 @@ impl PolyGraph {
                 // costs nothing.
                 silent: SILENCE_RUN,
                 idle: true,
+                block_peak: 0.0,
             })
             .collect();
         Self {
             voices,
-            scratch: Vec::new(),
+            scratch: vec![0.0; MAX_BLOCK],
             gain: Smoother::from_time(1.0, GAIN_SMOOTHING_SECONDS, sample_rate),
             next_age: 0,
         }
@@ -206,6 +227,10 @@ impl PolyGraph {
     /// Render the mix for one block: every un-parked voice into a shared
     /// scratch, velocity-scaled and summed, mix gain applied, then a single
     /// soft-clip on the summed signal.
+    ///
+    /// Blocks longer than [`MAX_BLOCK`] render in chunks so the scratch buffer stays
+    /// the size it was allocated at, because a host picks the block size and can
+    /// raise it while the plugin is loaded.
     pub fn process(&mut self, out: &mut [f32]) {
         for s in out.iter_mut() {
             *s = 0.0;
@@ -218,26 +243,36 @@ impl PolyGraph {
             gain,
             ..
         } = self;
-        if scratch.len() != out.len() {
-            scratch.resize(out.len(), 0.0);
+
+        for chunk in out.chunks_mut(MAX_BLOCK) {
+            let scratch = &mut scratch[..chunk.len()];
+
+            for v in voices.iter_mut() {
+                if v.idle {
+                    continue;
+                }
+                v.eng.process_raw(scratch);
+
+                let vel_gain = v.vel_gain;
+                let mut peak = 0.0f32;
+                for (dst, &src) in chunk.iter_mut().zip(scratch.iter()) {
+                    *dst += src * vel_gain;
+                    peak = peak.max(src.abs());
+                }
+                v.block_peak = v.block_peak.max(peak);
+            }
         }
 
+        // Silence detection runs once per host block rather than once per chunk, so
+        // an oversized block cannot park a voice any sooner than a normal one
+        // would have. `SILENCE_RUN` counts blocks, and a chunk is not a block.
         for v in voices.iter_mut() {
             if v.idle {
                 continue;
             }
-            v.eng.process_raw(scratch);
-
-            let vel_gain = v.vel_gain;
-            let mut peak = 0.0f32;
-            for (dst, &src) in out.iter_mut().zip(scratch.iter()) {
-                *dst += src * vel_gain;
-                peak = peak.max(src.abs());
-            }
-
             if v.note.is_some() {
                 v.silent = 0;
-            } else if peak < SILENCE_EPS {
+            } else if v.block_peak < SILENCE_EPS {
                 v.silent = v.silent.saturating_add(1);
                 if v.silent >= SILENCE_RUN {
                     v.idle = true;
@@ -245,6 +280,7 @@ impl PolyGraph {
             } else {
                 v.silent = 0;
             }
+            v.block_peak = 0.0;
         }
 
         for s in out.iter_mut() {
