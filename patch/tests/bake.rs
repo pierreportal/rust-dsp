@@ -1,5 +1,4 @@
-use patch::bake::{bake, BakeError, MAX_BAKED_NODE_ID, MAX_EDGES, MAX_NODES, MAX_PAYLOAD_BYTES};
-use patch::default_patch;
+use patch::bake::{bake, BakeError, MAX_BAKED_NODE_ID, MAX_NODES, MAX_PAYLOAD_BYTES};
 use serde_json::json;
 
 fn trivial_patch_json() -> String {
@@ -30,10 +29,13 @@ fn bake_rejects_empty_payload() {
 
 #[test]
 fn bake_tolerates_unknown_module_kind_with_repair() {
+    // An unrecognised module is dropped and the cable into it goes with it, but the
+    // rest of the instrument still builds. The sine and the Out are what make the
+    // patch playable, so the point of the fixture is the repair, not the graph.
     let j = json!({
         "v": 1,
-        "n": [[0, 255, 0.0, 0.0, {}], [1, 8, 0.0, 0.0, {}]],
-        "e": [[0,0,1,0]],
+        "n": [[0, 255, 0.0, 0.0, {}], [1, 10, 0.0, 0.0, {}], [2, 8, 0.0, 0.0, {}]],
+        "e": [[0,0,1,0], [1,0,2,0]],
     })
     .to_string();
     let res = bake(&j);
@@ -41,6 +43,58 @@ fn bake_tolerates_unknown_module_kind_with_repair() {
         res.is_ok(),
         "decode repairs unknown kinds; baking accepts repaired valid patch"
     );
+    let baked = res.unwrap();
+    assert!(
+        !baked.warnings.is_empty(),
+        "dropping a module the registry does not know should be reported"
+    );
+    assert_eq!(baked.node_count(), 2, "the unknown module should be gone");
+}
+
+#[test]
+fn bake_rejects_a_patch_whose_output_nothing_feeds() {
+    // An Out module with no cable into it renders silence on every note. Shipping
+    // that as a paid plugin is the exact failure the baking gate exists to prevent,
+    // so it is refused at build time rather than discovered by a customer.
+    let j = json!({
+        "v": 1,
+        "n": [[0, 10, 0.0, 0.0, {}], [1, 8, 0.0, 0.0, {}]],
+        "e": [],
+    })
+    .to_string();
+    assert!(matches!(bake(&j), Err(BakeError::NoAudioPath)));
+}
+
+#[test]
+fn bake_rejects_an_output_fed_only_by_control_voltage() {
+    // Nothing here can make a sound: a gate and an envelope into an Out is a
+    // constant, not an instrument.
+    let j = json!({
+        "v": 1,
+        "n": [[0, 9, 0.0, 0.0, {}], [1, 1, 0.0, 0.0, {}], [2, 8, 0.0, 0.0, {}]],
+        "e": [[0,0,1,0], [1,0,2,0]],
+    })
+    .to_string();
+    assert!(matches!(bake(&j), Err(BakeError::NoAudioPath)));
+}
+
+#[test]
+fn bake_accepts_a_signal_that_reaches_the_output_through_a_chain() {
+    // The reachability walk has to follow the whole chain, not just look at what is
+    // plugged into the Out.
+    let j = json!({
+        "v": 1,
+        "n": [
+            [0, 10, 0.0, 0.0, {}],  // SineOsc
+            [1, 2, 0.0, 0.0, {}],   // Filter
+            [2, 3, 0.0, 0.0, {}],   // Distortion
+            [3, 4, 0.0, 0.0, {}],   // Vca
+            [4, 8, 0.0, 0.0, {}],   // Out
+        ],
+        "e": [[0,0,1,0], [1,0,2,0], [2,0,3,0], [3,0,4,0]],
+    })
+    .to_string();
+    assert!(bake(&j).is_ok());
 }
 
 #[test]

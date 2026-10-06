@@ -23,8 +23,9 @@
 //! million table entries in the plugin. Since the decoder cannot be tightened
 //! without breaking cross-codec agreement, the tighter bound lives here.
 
-use crate::{decode, Decoded, Patch, PatchEdge};
+use crate::{Decoded, Patch, PatchEdge};
 use graph::{Kind, PolyGraph};
+use std::collections::HashSet;
 
 /// Most modules a baked patch may contain.
 ///
@@ -82,7 +83,20 @@ pub enum BakeError {
     /// The cables form a cycle, so there is no valid render order.
     Cycle,
     /// The graph decodes and validates, but no module produced an output at all.
+    ///
+    /// Having an `Out` module is not enough. `Out` passes whatever reaches it, so a
+    /// patch can contain a perfectly valid `Out` with nothing patched into it and
+    /// render pure silence on every note. That is the failure this variant exists
+    /// for, and the reason the check below walks the cables backwards from the
+    /// sink rather than only looking for the sink.
     NoAudioPath,
+    /// A module survived decoding with a kind the engine cannot convert.
+    ///
+    /// `decode` already drops unknown kinds, so this is unreachable unless the
+    /// codec and the registry have gone out of sync. Kept as its own error because
+    /// "the registry is wrong" and "the customer's patch is silent" are different
+    /// bugs with different owners.
+    RegistryMismatch { kind: u32 },
 }
 
 impl std::fmt::Display for BakeError {
@@ -120,7 +134,16 @@ impl std::fmt::Display for BakeError {
                 edge.source, edge.source_port, edge.target, edge.target_port
             ),
             BakeError::Cycle => write!(f, "cables form a cycle, so there is no render order"),
-            BakeError::NoAudioPath => write!(f, "patch cannot make sound"),
+            BakeError::NoAudioPath => write!(
+                f,
+                "nothing that can make a signal reaches the Out module, so the plugin \
+                 would render silence on every note"
+            ),
+            BakeError::RegistryMismatch { kind } => write!(
+                f,
+                "module kind {kind} survived decoding but the engine cannot build it; \
+                 the patch codec and the module registry disagree"
+            ),
         }
     }
 }
@@ -211,19 +234,20 @@ fn validate(patch: &Patch) -> Result<(), BakeError> {
 
     // Index the modules so cable checks are not quadratic on a large patch.
     let mut kinds: Vec<(u32, Kind)> = Vec::with_capacity(patch.nodes.len());
-    let mut has_sink = false;
+    let mut sinks: Vec<u32> = Vec::new();
     for node in &patch.nodes {
         // `decode` drops modules with an unknown kind, so anything left should be
         // convertible. Treat a failure as fatal rather than skipping, so a codec
         // and registry disagreement is loud instead of silently shrinking a
         // shipped instrument.
-        let kind = Kind::from_u8(node.kind).ok_or(BakeError::NoAudioPath)?;
+        let kind =
+            Kind::from_u8(node.kind).ok_or(BakeError::RegistryMismatch { kind: node.kind })?;
         if kind == Kind::Out {
-            has_sink = true;
+            sinks.push(node.id);
         }
         kinds.push((node.id, kind));
     }
-    if !has_sink {
+    if sinks.is_empty() {
         return Err(BakeError::NoSink);
     }
 
@@ -263,8 +287,56 @@ fn validate(patch: &Patch) -> Result<(), BakeError> {
     if has_cycle(patch, &kinds) {
         return Err(BakeError::Cycle);
     }
+    if !has_audio_path(patch, &kinds, &sinks) {
+        return Err(BakeError::NoAudioPath);
+    }
 
     Ok(())
+}
+
+/// Can anything that makes a sound actually reach the output?
+///
+/// The sink existing is not the same as the sink being fed, and the difference is
+/// a paid order that opens to nothing. `Out` forwards whatever arrives, so a patch
+/// whose only cable into `Out` comes from a modulation source renders a constant
+/// or a DC envelope, and one with no cable at all renders nothing.
+///
+/// Walks the cables backwards from every sink looking for an audio-producing
+/// module. This is a necessary condition, not a sufficient one: a patch can pass
+/// it and still be silent, because the engine can swallow a signal downstream (an
+/// oscillator gated by an envelope that never opens, say). That is fine. The check
+/// exists to refuse the graphs that are silent by construction, which are the
+/// common case for a patch that has been half-edited and then bought.
+fn has_audio_path(patch: &Patch, kinds: &[(u32, Kind)], sinks: &[u32]) -> bool {
+    let kind_of = |id: u32| kinds.iter().find(|(n, _)| *n == id).map(|(_, k)| *k);
+
+    let mut seen: HashSet<u32> = HashSet::new();
+    let mut stack: Vec<u32> = sinks.to_vec();
+    seen.extend(sinks.iter().copied());
+
+    while let Some(node) = stack.pop() {
+        if kind_of(node).is_some_and(produces_audio) {
+            return true;
+        }
+        for edge in &patch.edges {
+            if edge.target == node && seen.insert(edge.source) {
+                stack.push(edge.source);
+            }
+        }
+    }
+    false
+}
+
+/// Whether a module turns a CV or a note into a signal on its own.
+///
+/// The oscillators. Everything else either reshapes a signal that is already there
+/// (`Filter`, `Vca`, `Mixer`, `Distortion`), terminates the graph (`Out`), or emits
+/// only control voltage (`Midi`, `CC`, `Adsr`, `Constant`).
+fn produces_audio(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Osc | Kind::SineOsc | Kind::SawOsc | Kind::SquareOsc
+    )
 }
 
 /// Kahn's algorithm over the cables. Mirrors `GraphEngine::rebuild`, so a patch
