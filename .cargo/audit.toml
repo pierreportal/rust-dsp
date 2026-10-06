@@ -1,0 +1,11 @@
+# cargo-audit configuration (also read by the Security Audit CI job).
+[advisories]
+ignore = [
+    # quick-xml 0.30 is pinned by eframe 0.29 -> egui-winit -> accesskit_unix
+    # -> zbus_xml 4.0.0; cargo cannot move it without a full eframe upgrade.
+    # Both advisories are local DoS in D-Bus accessibility introspection XML
+    # parsing on Linux, never network-facing input in this application.
+    # Remove once desktop/ moves off eframe 0.29.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
