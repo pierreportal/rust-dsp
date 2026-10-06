@@ -75,7 +75,7 @@ fn decode_base64url(s: &str) -> Option<Vec<u8>> {
     use base64::Engine;
     // The TS side emits unpadded base64url; accept padding too.
     let mut owned = s.replace('-', "+").replace('_', "/");
-    while !owned.len().is_multiple_of(4) {
+    while owned.len() % 4 != 0 {
         owned.push('=');
     }
     base64::engine::general_purpose::STANDARD.decode(owned).ok()

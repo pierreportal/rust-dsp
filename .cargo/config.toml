@@ -1,0 +1,5 @@
+# Prefer dependency versions that satisfy the workspace MSRV (rust-version
+# above) when re-resolving, so a routine `cargo update` on a newer toolchain
+# cannot silently raise the effective MSRV and break the CI MSRV job.
+[resolver]
+incompatible-rust-versions = "fallback"

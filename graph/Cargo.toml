@@ -2,6 +2,7 @@
 name = "graph"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.86"
 description = "Runtime patch-graph engine and polyphonic voice pool, shared by every Coarse host."
 
 [dependencies]
