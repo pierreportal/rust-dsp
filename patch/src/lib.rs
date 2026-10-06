@@ -15,7 +15,7 @@
 //! ```
 //!
 //! This mirrors `rust_dsp_web/src/patch/patchCodec.ts`; the two are expected to
-//! stay byte-compatible, and [`tests::matches_the_typescript_encoding`] pins the
+//! stay byte-compatible, and `tests::matches_the_typescript_encoding` pins the
 //! shape against the same fixtures the browser uses.
 //!
 //! MIDI mappings are ordinary `Controller` nodes and ordinary cables, so adding

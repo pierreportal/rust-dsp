@@ -36,7 +36,7 @@ const CASCADE_CORNER_RATIO: f32 = 0.435;
 /// the acid bass sound.
 ///
 /// `cutoff` is the -3 dB point of the whole cascade, not of one section; see
-/// [`CASCADE_CORNER_RATIO`]. Above roughly `sample_rate * 0.196` every
+/// `CASCADE_CORNER_RATIO`. Above roughly `sample_rate * 0.196` every
 /// section is already pinned at Nyquist and the corner stops rising with the
 /// parameter.
 ///

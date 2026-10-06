@@ -228,9 +228,9 @@ impl PolyGraph {
     /// scratch, velocity-scaled and summed, mix gain applied, then a single
     /// soft-clip on the summed signal.
     ///
-    /// Blocks longer than [`MAX_BLOCK`] render in chunks so the scratch buffer stays
-    /// the size it was allocated at, because a host picks the block size and can
-    /// raise it while the plugin is loaded.
+    /// Blocks longer than `MAX_BLOCK` (4096 samples) render in chunks so the scratch
+    /// buffer stays the size it was allocated at, because a host picks the block size
+    /// and can raise it while the plugin is loaded.
     pub fn process(&mut self, out: &mut [f32]) {
         for s in out.iter_mut() {
             *s = 0.0;

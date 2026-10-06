@@ -263,18 +263,22 @@ mod tests {
     }
 
     #[test]
-    fn test_waveform_clone() {
+    fn test_waveform_copy() {
         let waveform = Waveform::Saw;
-        let _cloned = waveform.clone();
+        // A move would leave `waveform` unusable below, so this pins Copy rather
+        // than Clone: `Waveform` is copied into every frame it is rendered into.
+        let copied = waveform;
+        assert_eq!(waveform, copied);
 
         let phase = 0.5;
         assert_eq!(Waveform::saw(phase), Waveform::saw(phase));
     }
 
     #[test]
-    fn test_osc_clone() {
+    fn test_osc_copy() {
         let osc1 = Osc::new(Waveform::Triangle, 880.0, SAMPLE_RATE);
-        let osc2 = osc1.clone();
+        // Same: the fields are read below, which only compiles if `Osc` is Copy.
+        let osc2 = osc1;
 
         assert_eq!(osc1.phase, osc2.phase);
         assert_eq!(osc1.freq, osc2.freq);

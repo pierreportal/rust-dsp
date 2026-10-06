@@ -129,9 +129,8 @@ fn strongest_non_harmonic_bin(magnitude: &[f32], fundamental_bin: usize) -> (usi
         let start = bin.saturating_sub(2);
         let end = (bin + 2).min(nyquist_bin);
 
-        for index in start..=end {
-            masked[index] = false;
-        }
+        // `start <= end` holds because `bin <= nyquist_bin` was checked above.
+        masked[start..=end].fill(false);
 
         harmonic += 1;
     }

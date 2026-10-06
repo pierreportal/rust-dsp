@@ -27,7 +27,7 @@ pub enum FilterMode {
 /// 19.8 kHz.
 ///
 /// `cutoff` is the -3 dB point. `resonance` maps geometrically onto Q, from
-/// [`Q_FLAT`] (no peak) to [`Q_RESONANT`].
+/// `Q_FLAT` (no peak) to `Q_RESONANT`.
 #[derive(Clone, Copy)]
 pub struct Svf {
     pub sample_rate: f32,

@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(status.held_count(), 1);
 
         // An empty patch has no Midi node, so nothing can sound afterwards.
-        control.push(ControlMsg::LoadPatch(Box::new(Patch::default())));
+        control.push(ControlMsg::LoadPatch(Box::default()));
         let mut after = vec![0.0f32; 4096];
         tick(&mut voice, &events, &control, &status, 48000.0, &mut after);
         assert!(
