@@ -216,6 +216,22 @@ The browser client lives in a separate repo
 3. Deploy the rust-dsp-web client pinned to `web-vX.Y.Z` — users get the new
    module with no TypeScript changes.
 
+## The commercial plugin
+
+The paid plugin is not in this repository. One customer's graph is baked into a
+single binary, and that graph is the product — so `plugin` (the core that plays a
+fixed graph) and the VST3 adapter live in a **private** repo alongside the order
+pipeline that builds them.
+
+What stays here is everything they run: the `graph` engine, the `patch` format and
+its `bake` validation layer, and `dsp`. The private repo depends on `graph` and
+`patch` by git tag (`core-v0.1.0`), so all of Coarse still runs one synth and an
+engine fix reaches the plugin by bumping that tag rather than by copying code.
+
+So this repository stays publishable, and `patch::bake` — which decides whether a
+submitted patch can become a working instrument at all — is still testable here
+without a customer, a DAW or a licence.
+
 ## Development
 
 ### Building for Embedded
